@@ -1,0 +1,43 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Foundations/Tables" />
+
+# Tables
+
+## Wide table in a horizontal scroll container
+
+<div className="scroll-x" style={{ overflowX: 'auto', border: '1px solid #ddd', borderRadius: 6 }}>
+  <table style={{ borderCollapse: 'collapse', whiteSpace: 'nowrap' }}>
+    <thead>
+      <tr>{['Token', 'Light', 'Dark', 'High contrast', 'Usage', 'Component', 'Figma name', 'CSS variable', 'Since', 'Status', 'Owner', 'Notes'].map((h) => <th key={h} style={{ padding: '8px 12px', textAlign: 'left' }}>{h}</th>)}</tr>
+    </thead>
+    <tbody>
+      {['primary', 'secondary', 'success', 'warning', 'danger', 'info'].map((t) => (
+        <tr key={t}>{[`color.${t}.default`, '#1ea7fd', '#0b5fff', '#003cc5', 'Buttons, links and focus rings', 'Button, Link', `Color/${t}/Default`, `--color-${t}-default`, 'v1.0.0', 'stable', 'Design Systems Team', 'Do not use on dark surfaces'].map((c, i) => <td key={i} style={{ padding: '8px 12px', borderTop: '1px solid #eee' }}>{c}</td>)}</tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+## Long table in a fixed-height scroll container
+
+<div className="scroll-y" style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid #ddd', borderRadius: 6 }}>
+  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+    <thead><tr><th style={{ textAlign: 'left', padding: 6 }}>Spacing token</th><th style={{ textAlign: 'left', padding: 6 }}>Value</th></tr></thead>
+    <tbody>
+      {Array.from({ length: 24 }, (_, i) => <tr key={i}><td style={{ padding: 6, borderTop: '1px solid #eee' }}>{`space.${i}`}</td><td style={{ padding: 6, borderTop: '1px solid #eee' }}>{i * 4}px</td></tr>)}
+    </tbody>
+  </table>
+</div>
+
+## Table without a scroll container
+
+<table>
+  <thead><tr><th>Name</th><th>Description</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td>size</td><td>How large should the button be? A very long description that has to wrap nicely across several lines in print, without making the table wider than the page.</td><td><code>medium</code></td></tr>
+    <tr><td>primary</td><td>Is this the principal call to action on the page?</td><td><code>false</code></td></tr>
+  </tbody>
+</table>
+
+Last line.

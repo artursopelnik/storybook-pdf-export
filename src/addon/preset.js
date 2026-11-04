@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { fitOnPrintScript } from '../fit.js';
 
 const printCss = readFileSync(fileURLToPath(new URL('../print.css', import.meta.url)), 'utf8');
 
@@ -29,5 +30,5 @@ export const managerHead = (head = '', options = {}) => {
 
 export const previewHead = (head = '', options = {}) => {
   if (options.printCss === false) return head;
-  return `${head}\n<style data-storybook-pdf-export>\n${printCss}\n</style>`;
+  return `${head}\n<style data-storybook-pdf-export>\n${printCss}\n</style>\n<script data-storybook-pdf-export>${fitOnPrintScript()}</script>`;
 };

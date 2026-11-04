@@ -230,6 +230,12 @@
     display: table-header-group;
   }
 
+  /* Long cell content wraps instead of widening the table past the page. */
+  .sbdocs-content td,
+  .sbdocs-content th {
+    overflow-wrap: break-word;
+  }
+
   tr,
   img,
   svg,

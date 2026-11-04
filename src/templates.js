@@ -14,7 +14,7 @@ import { MIME } from './util.js';
 export const PAGE_LINK = 'https://storybook-pdf-export.invalid/page/';
 
 export const DEFAULT_THEME = {
-  /** Brand / accent colour (cover bar, TOC top level). */
+  /** Brand / accent colour (cover accent line, TOC top level). */
   accentColor: '#ff4785',
   textColor: '#1b1b1b',
   mutedColor: '#73777b',
@@ -57,14 +57,21 @@ body { font-family: var(--pdf-font); color: var(--pdf-text); -webkit-print-color
 }
 
 export const BASE_CSS = `
-  /* The cover is rendered without page margins: position: fixed + inset: 0 fills the whole sheet. */
-  .cover { position: fixed; inset: 0; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center;
-           padding: var(--pdf-margin-top) var(--pdf-margin-right) var(--pdf-margin-bottom) calc(var(--pdf-margin-left) + 8mm);
-           border-left: 8mm solid var(--pdf-accent); }
-  .cover .logo { max-height: 22mm; max-width: 70mm; margin-bottom: 18mm; align-self: flex-start; }
-  .cover h1 { font-size: 32pt; margin: 0 0 8pt; line-height: 1.1; }
-  .cover p { font-size: 14pt; margin: 0; color: var(--pdf-muted); }
-  .cover .meta { margin-top: 24pt; font-size: 10.5pt; color: var(--pdf-muted); }
+  /*
+   * Cover: calm and robust. Rendered without page margins (position: fixed;
+   * inset: 0 fills exactly one sheet), so it can never spill onto a second
+   * page. Long titles wrap, oversized logos are contained.
+   */
+  .cover { position: fixed; inset: 0; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column;
+           padding: calc(var(--pdf-margin-top) + 6mm) calc(var(--pdf-margin-right) + 6mm) calc(var(--pdf-margin-bottom) + 2mm) calc(var(--pdf-margin-left) + 6mm); }
+  .cover .logo { display: block; width: auto; height: auto; max-width: 60mm; max-height: 16mm; object-fit: contain; object-position: left center; }
+  .cover .main { margin-top: auto; margin-bottom: auto; padding-bottom: 20mm; min-width: 0; }
+  .cover .rule { width: 18mm; height: 1.2mm; background: var(--pdf-accent); margin-bottom: 9mm; }
+  .cover h1 { font-size: 30pt; line-height: 1.15; font-weight: 700; margin: 0 0 4mm; letter-spacing: -0.01em;
+              overflow-wrap: anywhere; hyphens: auto; max-width: 150mm; }
+  .cover h1.long { font-size: 22pt; }
+  .cover p { font-size: 13pt; line-height: 1.4; margin: 0; color: var(--pdf-muted); overflow-wrap: anywhere; max-width: 150mm; }
+  .cover .meta { border-top: 0.5pt solid #d0d3d6; padding-top: 4mm; font-size: 9pt; color: var(--pdf-muted); overflow-wrap: anywhere; }
   .toc h1 { font-size: 20pt; margin: 0 0 14pt; }
   .toc ol { list-style: none; margin: 0; padding: 0; }
   .toc li { break-inside: avoid; }
@@ -83,11 +90,16 @@ export const BASE_CSS = `
 // ---- Default templates -------------------------------------------------------
 
 export function cover(ctx) {
+  const meta = [ctx.version && `Version ${esc(ctx.version)}`, esc(ctx.dateText), ctx.author && esc(ctx.author)].filter(Boolean);
+  const long = String(ctx.title ?? '').length > 48;
   return `<section class="cover">
-    ${ctx.logo ? `<img class="logo" src="${esc(ctx.logo)}" alt="">` : ''}
-    <h1>${esc(ctx.title)}</h1>
-    ${ctx.subtitle ? `<p>${esc(ctx.subtitle)}</p>` : ''}
-    <div class="meta">${[ctx.version && `Version ${esc(ctx.version)}`, esc(ctx.dateText), ctx.author && esc(ctx.author)].filter(Boolean).join(' · ')}</div>
+    ${ctx.logo ? `<img class="logo" src="${esc(ctx.logo)}" alt="">` : '<div></div>'}
+    <div class="main">
+      <div class="rule"></div>
+      <h1${long ? ' class="long"' : ''}>${esc(ctx.title)}</h1>
+      ${ctx.subtitle ? `<p>${esc(ctx.subtitle)}</p>` : ''}
+    </div>
+    <div class="meta">${meta.join(' · ')}</div>
   </section>`;
 }
 

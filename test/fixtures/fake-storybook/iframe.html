@@ -26,6 +26,14 @@
         ${lorem(60)}
         <img loading="lazy" src="pixel.svg" width="40" height="40" alt="">`,
       'components-button--docs': `<h1>Button</h1><div class="sbdocs-preview"><div class="docs-story"><button>Primary</button></div></div>`,
+      'foundations-tables--docs': `<h1>Tables</h1>
+        <div id="scroll-x" style="overflow-x:auto"><table id="wide" style="white-space:nowrap;border-collapse:collapse">
+          <tr>${Array.from({ length: 10 }, (_, i) => `<td style="padding:4px 10px">column-${i}-with-a-long-value</td>`).join('')}</tr>
+        </table></div>
+        <div id="scroll-y" style="max-height:80px;overflow-y:auto"><table>
+          ${Array.from({ length: 30 }, (_, i) => `<tr><td>row ${i}</td></tr>`).join('')}
+        </table></div>
+        <div id="opt-out" class="sb-print-no-fit" style="max-height:40px;overflow-y:auto">${lorem(10)}</div>`,
     };
     setTimeout(() => {
       document.body.classList.remove('sb-show-preparing-docs');

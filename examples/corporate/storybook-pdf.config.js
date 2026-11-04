@@ -28,9 +28,7 @@ export default defineConfig({
   // dateText, logo, theme, entries, esc, …). Return '' to leave it out.
   templates: {
     css: `
-      .cover { border-left: 0; background: linear-gradient(160deg, #0b5fff, #0b2a5b); color: #fff; padding: 30mm 22mm; }
-      .cover p, .cover .meta { color: #cfe0ff; }
-      .running.header { border-bottom: 0.5pt solid #ccd; padding-bottom: 2mm; }
+      .running.header { border-bottom: 0.5pt solid #d0d3d6; padding-bottom: 2mm; }
     `,
 
     // Running header: logo + current component on every content page.

@@ -21,3 +21,11 @@ test('previewHead injects print.css unless disabled', () => {
   assert.match(previewHead('', {}), /data-storybook-pdf-export[\s\S]*@media print/);
   assert.equal(previewHead('<x>', { printCss: false }), '<x>');
 });
+
+test('previewHead wires the scroll-container fitting to the print dialog', async () => {
+  const head = previewHead('', {});
+  assert.match(head, /addEventListener\('beforeprint'/);
+  assert.match(head, /addEventListener\('afterprint'/);
+  const script = head.match(/<script data-storybook-pdf-export>([\s\S]*)<\/script>/)[1];
+  assert.doesNotThrow(() => new Function(script), 'injected script is valid JavaScript');
+});

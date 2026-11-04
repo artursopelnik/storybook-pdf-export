@@ -24,27 +24,28 @@ const result = await exportPdf({
   hooks: {
     // Inspect the real DOM in print mode right before it is printed.
     beforeRender: async ({ page, entry }) => {
-      // A4 minus the default margins is ~178 mm ≈ 674 CSS px wide.
-      const viewport = page.viewportSize();
-      await page.setViewportSize({ width: 674, height: 900 });
-      await page.emulateMedia({ media: 'print' });
+      // The exporter already lays the page out at A4 print width in print media.
       const dom = await page.evaluate(() => {
         // The addon bakes print.css into the build; drop that copy so only the
         // stylesheet injected by the exporter is under test.
         document.querySelector('style[data-storybook-pdf-export]')?.remove();
         const visible = (sel) => [...document.querySelectorAll(sel)].filter((e) => e.getBoundingClientRect().height > 0).length;
+        const right = document.querySelector('#storybook-docs')?.getBoundingClientRect().right ?? innerWidth;
+        const scrollY = document.querySelector('.scroll-y');
         return {
+          printMedia: matchMedia('print').matches,
+          width: document.documentElement.clientWidth,
           stories: visible('.docs-story'),
           toolbars: visible('[aria-label="Zoom in"], .sbdocs-preview-actions, .docblock-code-toggle'),
           printOnly: visible('.sb-print-only'),
           noPrint: visible('.sb-no-print'),
-          overflowing: [...document.querySelectorAll('#storybook-docs pre, #storybook-docs table')]
-            .filter((e) => e.getBoundingClientRect().right > document.documentElement.clientWidth + 1)
-            .map((e) => e.tagName),
+          overflowing: [...document.querySelectorAll('#storybook-docs pre, #storybook-docs table, #storybook-docs .scroll-x')]
+            .filter((e) => e.getBoundingClientRect().right > right + 1)
+            .map((e) => e.tagName + (e.className ? `.${e.className}` : '')),
+          clippedY: scrollY ? scrollY.scrollHeight > scrollY.clientHeight + 1 : false,
+          wideColumns: document.querySelectorAll('.scroll-x th').length,
         };
       });
-      await page.emulateMedia({ media: null });
-      await page.setViewportSize(viewport);
       checks.push({ id: entry.id, ...dom });
     },
   },
@@ -56,6 +57,16 @@ console.log(checks);
 assert.deepEqual(result.failed, []);
 assert.ok(result.entries.some((e) => e.id === 'components-forms-button--docs'), 'autodocs page exported');
 assert.ok(!result.entries.some((e) => e.id === 'components-badge--hidden'), '"no-pdf" tag respected');
+
+for (const c of checks) {
+  assert.ok(c.printMedia, `${c.id} rendered in print media`);
+  assert.equal(c.width, 672, `${c.id} laid out at A4 print width`);
+}
+
+const tables = byId['foundations-tables--docs'];
+assert.ok(tables, 'tables page exported');
+assert.equal(tables.clippedY, false, 'fixed-height scroll container fully expanded');
+assert.equal(tables.wideColumns, 12, 'all columns of the wide table present');
 
 const button = byId['components-forms-button--docs'];
 assert.ok(button.stories >= 4, `story previews visible in print (got ${button.stories})`);

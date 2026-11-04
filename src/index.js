@@ -10,7 +10,7 @@ import * as defaults from './templates.js';
 import { DEFAULT_THEME, DEFAULT_TEMPLATES, PAGE_LINK, documentHtml, overlayHtml, resolveLogo, esc } from './templates.js';
 import { listenForRender, renderEntry, renderHtml } from './render.js';
 import { merge, applyOverlay, pageCount, startPages, rewriteLinks, pageIndexById, addOutline } from './pdf.js';
-import { NO_MARGIN, isUrl, firstLine, formatTitle, entryLabel, plural, readProjectPackage } from './util.js';
+import { NO_MARGIN, isUrl, firstLine, formatTitle, entryLabel, plural, readProjectPackage, printableWidth } from './util.js';
 
 const { PDFDocument } = PDFLib;
 
@@ -84,14 +84,17 @@ export async function exportPdf(opts = {}) {
     const { chromium } = await import('playwright');
     const executablePath = o.chromium ?? process.env.STORYBOOK_PDF_CHROMIUM;
     browser = await chromium.launch(executablePath ? { executablePath } : {});
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
+    // Lay pages out at the width they will have on paper, so responsive
+    // components and the scroll-container fitting see the real space.
+    const printWidth = printableWidth(o);
+    const context = await browser.newContext({ viewport: { width: printWidth, height: 1000 }, deviceScaleFactor: 1 });
     context.setDefaultTimeout(o.timeout);
     context.setDefaultNavigationTimeout(o.timeout);
 
     const pdfOptions = { format: o.format, landscape: o.landscape, margin: o.margin, printBackground: true };
 
     // ---- 1. Render every entry ----------------------------------------------
-    const { parts, failed } = await renderEntries(context, { base, entries, css, pdfOptions, o });
+    const { parts, failed } = await renderEntries(context, { base, entries, css, pdfOptions, printWidth, o });
     if (failed.length && o.strict) {
       throw new Error(`${plural(failed.length, 'entry', 'entries')} failed to render:\n` +
         failed.map((f) => `  - ${entryLabel(f.entry)}: ${firstLine(f.error)}`).join('\n'));
@@ -128,7 +131,13 @@ export async function exportPdf(opts = {}) {
         if (!body) return null;
         const fullBleed = name === 'cover';
         const html = documentHtml(body, { printCss: css, theme, templateCss: templates.css, margin: o.margin, fullBleed });
-        return PDFDocument.load(await renderHtml(page, html, fullBleed ? { ...pdfOptions, margin: NO_MARGIN } : pdfOptions));
+        const doc = await PDFDocument.load(await renderHtml(page, html, fullBleed ? { ...pdfOptions, margin: NO_MARGIN } : pdfOptions));
+        // A cover is one page, whatever a custom template does.
+        if (name === 'cover' && doc.getPageCount() > 1) {
+          o.warn(`⚠ The cover template produced ${doc.getPageCount()} pages; only the first one is used.`);
+          while (doc.getPageCount() > 1) doc.removePage(doc.getPageCount() - 1);
+        }
+        return doc;
       };
 
       const cover = o.cover ? await renderTemplate('cover', { kind: 'cover' }) : null;
@@ -201,6 +210,7 @@ function normaliseOptions(opts) {
     hooks: given.hooks ?? {},
     cwd: given.cwd ?? process.cwd(),
     log: given.log ?? (() => {}),
+    warn,
     date: given.date == null ? new Date() : new Date(given.date),
   };
 
@@ -214,6 +224,7 @@ function normaliseOptions(opts) {
     if (!Number.isFinite(o[key]) || o[key] < 0) throw new Error(`"${key}" must be a non-negative number.`);
   }
   o.concurrency = Math.max(1, Math.floor(o.concurrency));
+  printableWidth(o); // throws on unknown formats / margin units before anything starts
   for (const [name, fn] of Object.entries(o.hooks)) {
     if (typeof fn !== 'function') throw new Error(`Hook "${name}" must be a function.`);
   }
@@ -250,7 +261,7 @@ async function buildPrintCss(o) {
  * Renders all entries with `concurrency` pages in parallel. A failing entry is
  * recorded and skipped; its page is replaced in case the renderer crashed.
  */
-async function renderEntries(context, { base, entries, css, pdfOptions, o }) {
+async function renderEntries(context, { base, entries, css, pdfOptions, printWidth, o }) {
   const rendered = new Array(entries.length);
   const failed = [];
   let next = 0;
@@ -269,7 +280,7 @@ async function renderEntries(context, { base, entries, css, pdfOptions, o }) {
         const i = next++;
         const entry = entries[i];
         try {
-          let pdf = await renderEntry(page, { base, entry, css, pdfOptions, delay: o.delay, beforeRender: o.hooks.beforeRender });
+          let pdf = await renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay: o.delay, beforeRender: o.hooks.beforeRender });
           if (o.hooks.afterRender) pdf = (await o.hooks.afterRender({ entry, pdf })) ?? pdf;
           rendered[i] = await PDFDocument.load(pdf);
         } catch (error) {

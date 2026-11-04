@@ -57,3 +57,36 @@ export async function readProjectPackage(source) {
   }
   return {};
 }
+
+/** CSS length (number = px, or "12mm", "1in", "2cm", "10pt", "8px") → CSS px at 96 dpi. */
+export function toPx(value) {
+  if (typeof value === 'number') return value;
+  const match = /^\s*(-?[\d.]+)\s*(px|mm|cm|in|pt)?\s*$/i.exec(String(value ?? 0));
+  if (!match) throw new Error(`Unsupported length "${value}". Use px, mm, cm, in or pt.`);
+  const n = Number(match[1]);
+  const unit = (match[2] ?? 'px').toLowerCase();
+  return n * { px: 1, mm: 96 / 25.4, cm: 96 / 2.54, in: 96, pt: 96 / 72 }[unit];
+}
+
+/** Paper sizes Playwright knows, in millimetres (width × height). */
+const PAPER = {
+  letter: [215.9, 279.4],
+  legal: [215.9, 355.6],
+  tabloid: [279.4, 431.8],
+  ledger: [431.8, 279.4],
+  a0: [841, 1189],
+  a1: [594, 841],
+  a2: [420, 594],
+  a3: [297, 420],
+  a4: [210, 297],
+  a5: [148, 210],
+  a6: [105, 148],
+};
+
+/** Width of the printable area (paper minus left/right margin) in CSS px. */
+export function printableWidth({ format = 'A4', landscape = false, margin = {} }) {
+  const size = PAPER[String(format).toLowerCase()];
+  if (!size) throw new Error(`Unknown paper format "${format}". Use one of: ${Object.keys(PAPER).map((k) => k.toUpperCase()).join(', ')}.`);
+  const paper = toPx(`${landscape ? Math.max(...size) : size[0]}mm`);
+  return Math.floor(paper - toPx(margin.left) - toPx(margin.right));
+}

@@ -3,6 +3,7 @@
  * waiting until it is really finished, and printing it.
  */
 import { entryLabel } from './util.js';
+import { fitForPrint } from './fit.js';
 
 /** How long the DOM has to stay unchanged before a page counts as rendered. */
 const QUIET_MS = 400;
@@ -15,6 +16,8 @@ const SETTLE_MAX_MS = 10_000;
  * or customised setups) the DOM-based check in `waitForStorybook` takes over.
  */
 export function listenForRender() {
+  // Tells the addon's print script (baked into the build) that the exporter is in charge.
+  window.__STORYBOOK_PDF_EXPORT__ = true;
   const hook = (channel) => {
     for (const ev of ['docsRendered', 'storyRendered', 'storyErrored', 'storyThrewException']) {
       channel.on(ev, () => { window.__sbPdfRendered = true; });
@@ -30,7 +33,7 @@ export function listenForRender() {
 }
 
 /** Opens a docs page or story, waits until it is rendered and returns its PDF. */
-export async function renderEntry(page, { base, entry, css, pdfOptions, delay = 0, beforeRender }) {
+export async function renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay = 0, beforeRender }) {
   const viewMode = entry.type === 'docs' ? 'docs' : 'story';
   const url = new URL(`iframe.html?id=${encodeURIComponent(entry.id)}&viewMode=${viewMode}`, base);
 
@@ -49,8 +52,16 @@ export async function renderEntry(page, { base, entry, css, pdfOptions, delay = 
   }
 
   await settle(page, delay);
-  if (beforeRender) await beforeRender({ page, entry });
-  return page.pdf(pdfOptions);
+
+  // Scroll containers can't scroll on paper: expand / open / scale them.
+  await page.emulateMedia({ media: 'print' });
+  try {
+    await page.evaluate(fitForPrint, { width: printWidth });
+    if (beforeRender) await beforeRender({ page, entry });
+    return await page.pdf(pdfOptions);
+  } finally {
+    await page.emulateMedia({ media: null });
+  }
 }
 
 async function waitForStorybook(page, viewMode) {

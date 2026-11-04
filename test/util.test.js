@@ -29,3 +29,18 @@ test('readProjectPackage finds the package.json next to the build', async () => 
     await rm(dir, { recursive: true });
   }
 });
+
+test('toPx / printableWidth', async () => {
+  const { toPx, printableWidth } = await import('../src/util.js');
+  assert.equal(toPx(10), 10);
+  assert.equal(toPx('1in'), 96);
+  assert.equal(Math.round(toPx('25.4mm')), 96);
+  assert.equal(Math.round(toPx('2.54cm')), 96);
+  assert.equal(toPx('72pt'), 96);
+  assert.throws(() => toPx('1em'), /Unsupported length/);
+  const margin = { left: '16mm', right: '16mm' };
+  assert.equal(printableWidth({ format: 'A4', margin }), 672); // 210mm - 32mm = 178mm
+  assert.ok(printableWidth({ format: 'a4', landscape: true, margin }) > 1000);
+  assert.equal(printableWidth({ format: 'Letter', margin: { left: '0.5in', right: '0.5in' } }), 720);
+  assert.throws(() => printableWidth({ format: 'Napkin' }), /Unknown paper format/);
+});

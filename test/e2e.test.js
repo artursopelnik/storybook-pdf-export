@@ -72,8 +72,8 @@ test('exports docs pages and story-only components with TOC, bookmarks and links
   const result = await run(t, { title: 'Fake DS', log: (m) => logs.push(m) });
   if (!result) return;
 
-  // Intro, Button docs, Badge story; Broken fails, Secret is tagged no-pdf.
-  assert.deepEqual(result.entries.map((e) => e.id), ['intro--docs', 'components-button--docs', 'components-badge--default']);
+  // Intro, Button docs, Badge story, Tables; Broken fails, Secret is tagged no-pdf.
+  assert.deepEqual(result.entries.map((e) => e.id), ['intro--docs', 'components-button--docs', 'components-badge--default', 'foundations-tables--docs']);
   assert.deepEqual(result.failed.map((f) => f.entry.id), ['components-broken--docs']);
   assert.match(result.failed[0].error.message, /Boom: component threw/);
 
@@ -81,7 +81,7 @@ test('exports docs pages and story-only components with TOC, bookmarks and links
   assert.equal(doc.getPageCount(), result.pages);
   assert.equal(doc.getTitle(), 'Fake DS');
 
-  assert.deepEqual(outline(doc), ['Intro', 'Components', '  Button', '  Badge', '    Default']);
+  assert.deepEqual(outline(doc), ['Intro', 'Components', '  Button', '  Badge', '    Default', 'Foundations', '  Tables']);
 
   const all = links(doc);
   // TOC (page 2) links to every bookmark target.
@@ -118,7 +118,7 @@ test('templates, theme and hooks are applied', async (t) => {
       output: 'out/fake.pdf',
       cwd: dir,
       mode: 'docs',
-      exclude: ['Components/Broken'],
+      exclude: ['Components/Broken', 'Foundations'],
       date: '2026-01-02',
       version: '9.9.9',
       theme: { accentColor: '#0b5fff', logo: join(FIXTURE, 'pixel.svg') },
@@ -200,6 +200,84 @@ test('settle() does not wait for lazy images below the fold', async (t) => {
     await settle(page);
     assert.ok(Date.now() - started < 3000, `settle took ${Date.now() - started} ms`);
     assert.equal(await page.evaluate(() => document.images[0].complete), true);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
+test('scroll containers are expanded and wide tables fit the page', async (t) => {
+  const seen = {};
+  const result = await run(t, {
+    include: ['Foundations'],
+    cover: false,
+    toc: false,
+    hooks: {
+      beforeRender: async ({ page }) => {
+        Object.assign(seen, await page.evaluate(() => {
+          const box = (id) => document.getElementById(id);
+          return {
+            pageWidth: document.documentElement.clientWidth,
+            wideRight: box('wide').getBoundingClientRect().right,
+            yExpanded: box('scroll-y').clientHeight >= box('scroll-y').scrollHeight,
+            optOutUntouched: box('opt-out').clientHeight < box('opt-out').scrollHeight,
+          };
+        }));
+      },
+    },
+  });
+  if (!result) return;
+  assert.ok(seen.wideRight <= seen.pageWidth + 1, `wide table fits: right edge ${seen.wideRight} > ${seen.pageWidth}`);
+  assert.equal(seen.pageWidth, 672, 'laid out at the printable width of A4 minus margins');
+  assert.ok(seen.yExpanded, 'vertical scroll box shows all rows');
+  assert.ok(seen.optOutUntouched, '.sb-print-no-fit is left alone');
+});
+
+test('a cover template that overflows is cut to one page', async (t) => {
+  const warnings = [];
+  const result = await run(t, {
+    include: ['Intro'],
+    toc: false,
+    templates: { cover: () => '<p>line</p>'.repeat(300) },
+    warn: (m) => warnings.push(m),
+  });
+  if (!result) return;
+  const withoutCover = await run(t, { include: ['Intro'], toc: false, cover: false });
+  assert.equal(result.pages, withoutCover.pages + 1);
+  assert.match(warnings.join(), /cover template produced \d+ pages/);
+});
+
+test('fitForPrint is fully reversible and the addon script yields to the exporter', async (t) => {
+  if (browserMissing) return t.skip();
+  const { chromium: pw } = await import('playwright');
+  const { fitForPrint, fitOnPrintScript } = await import('../src/fit.js');
+  const { serveStatic } = await import('../src/server.js');
+  const server = await serveStatic(FIXTURE);
+  const browser = await pw.launch(chromium ? { executablePath: chromium } : {});
+  try {
+    const page = await browser.newPage({ viewport: { width: 672, height: 900 } });
+    await page.goto(new URL('iframe.html?id=foundations-tables--docs&viewMode=docs', server.url).href);
+    await page.waitForSelector('#wide');
+    const snapshot = () => page.evaluate(() => document.getElementById('storybook-docs').innerHTML);
+    const before = await snapshot();
+
+    const stats = await page.evaluate(fitForPrint, { width: 672 });
+    assert.equal(stats.expanded, 1);
+    assert.equal(stats.opened, 1);
+    assert.equal(stats.forced, 0, `fits without breaking words anywhere: ${JSON.stringify(stats)}`);
+    assert.ok(await page.evaluate(() => document.querySelector('#wide td').textContent.includes('​')), 'break opportunities after separators');
+
+    await page.evaluate(fitForPrint, { restore: true });
+    assert.equal(await snapshot(), before, 'DOM restored exactly');
+
+    // The addon's print script fits on beforeprint, but not during an export.
+    await page.addScriptTag({ content: fitOnPrintScript() });
+    await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
+    assert.notEqual(await snapshot(), before);
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+    assert.equal(await snapshot(), before);
+    await page.evaluate(() => { window.__STORYBOOK_PDF_EXPORT__ = true; window.dispatchEvent(new Event('beforeprint')); });
+    assert.equal(await snapshot(), before, 'yields to the exporter');
   } finally {
     await browser.close();
     await server.close();

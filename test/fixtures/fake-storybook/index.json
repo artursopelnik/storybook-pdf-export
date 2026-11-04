@@ -1,11 +1,58 @@
 {
   "v": 5,
   "entries": {
-    "intro--docs": { "id": "intro--docs", "title": "Intro", "name": "Docs", "type": "docs", "tags": [] },
-    "components-button--docs": { "id": "components-button--docs", "title": "Components/Button", "name": "Docs", "type": "docs", "tags": ["autodocs"] },
-    "components-button--primary": { "id": "components-button--primary", "title": "Components/Button", "name": "Primary", "type": "story", "tags": [] },
-    "components-badge--default": { "id": "components-badge--default", "title": "Components/Badge", "name": "Default", "type": "story", "tags": [] },
-    "components-broken--docs": { "id": "components-broken--docs", "title": "Components/Broken", "name": "Docs", "type": "docs", "tags": [] },
-    "internal-secret--docs": { "id": "internal-secret--docs", "title": "Internal/Secret", "name": "Docs", "type": "docs", "tags": ["no-pdf"] }
+    "intro--docs": {
+      "id": "intro--docs",
+      "title": "Intro",
+      "name": "Docs",
+      "type": "docs",
+      "tags": []
+    },
+    "components-button--docs": {
+      "id": "components-button--docs",
+      "title": "Components/Button",
+      "name": "Docs",
+      "type": "docs",
+      "tags": [
+        "autodocs"
+      ]
+    },
+    "components-button--primary": {
+      "id": "components-button--primary",
+      "title": "Components/Button",
+      "name": "Primary",
+      "type": "story",
+      "tags": []
+    },
+    "components-badge--default": {
+      "id": "components-badge--default",
+      "title": "Components/Badge",
+      "name": "Default",
+      "type": "story",
+      "tags": []
+    },
+    "foundations-tables--docs": {
+      "id": "foundations-tables--docs",
+      "title": "Foundations/Tables",
+      "name": "Docs",
+      "type": "docs",
+      "tags": []
+    },
+    "components-broken--docs": {
+      "id": "components-broken--docs",
+      "title": "Components/Broken",
+      "name": "Docs",
+      "type": "docs",
+      "tags": []
+    },
+    "internal-secret--docs": {
+      "id": "internal-secret--docs",
+      "title": "Internal/Secret",
+      "name": "Docs",
+      "type": "docs",
+      "tags": [
+        "no-pdf"
+      ]
+    }
   }
 }

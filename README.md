@@ -139,7 +139,7 @@ The cover, table of contents, running header and footer, and an optional back pa
 export default defineConfig({
   templates: {
     // Extra CSS for all generated pages
-    css: `.cover { background: linear-gradient(160deg, #0b5fff, #0b2a5b); color: #fff; border: 0; }`,
+    css: `.running.header { border-bottom: 0.5pt solid #d0d3d6; padding-bottom: 2mm; }`,
 
     // Logo + current component at the top of every content page
     header: (ctx) => ctx.kind === 'content'
@@ -162,7 +162,9 @@ export default defineConfig({
 **What templates get (`ctx`):** `title`, `subtitle`, `author`, `version` (from your package.json), `date`, `dateText`, `logo`, `theme`, `entries`, `esc()` for HTML escaping.
 Header and footer also get `kind`, `pageNumber`, `total`, `section` and `entry`. The TOC gets `tree` and `items`, and each `href` becomes an internal PDF link.
 
-Header and footer are rendered by Chromium and laid over each page, so **web fonts, SVG logos and any CSS** work there too. The cover gets the full sheet without margins, so full-bleed backgrounds work. Want to start from the defaults? `import { templates } from 'storybook-pdf-export'`.
+Header and footer are rendered by Chromium and laid over each page, so **web fonts, SVG logos and any CSS** work there too. Want to start from the defaults? `import { templates } from 'storybook-pdf-export'`.
+
+**The cover can't break anything.** The default cover is deliberately calm: white page, your logo in its original colors, a short accent line, title, subtitle, and a meta line at the bottom. Long titles wrap and get a smaller size, and oversized logos are limited to 60 × 16 mm. The cover always has exactly one sheet. It is rendered without page margins (so a full-bleed background works if you want one), and if a custom cover template produces more than one page, only the first is used and you get a warning. The rest of the PDF is never affected.
 
 ### 3. Hooks: step into the pipeline
 
@@ -236,6 +238,7 @@ The toolbar gets two buttons:
 - **Black, underlined links.** External links get their URL printed after them, because paper can't be clicked.
 - **Code blocks** stay in one piece when they fit on a page, and long lines wrap instead of being cut off
 - **Story previews, table rows and images** never split across pages, and headings are never left alone at the bottom of a page
+- **Scroll containers are made printable** (see below)
 - **Interactive chrome hidden:** zoom toolbar, "Copy code", the controls column of the ArgTypes table
 - **Colors kept** (`print-color-adjust: exact`), so color swatches and token tables survive
 
@@ -247,6 +250,7 @@ Utility classes for your MDX and components:
 | `.sb-print-only`    | Only visible in print / PDF     |
 | `.sb-page-break`    | Starts a new page               |
 | `.sb-keep-together` | Never split across pages        |
+| `.sb-print-no-fit`  | Leave this scroll container / table exactly as it is |
 
 ```mdx
 <div className="sb-print-only">
@@ -257,6 +261,20 @@ Utility classes for your MDX and components:
 Add your own rules with `--css my-print.css` (or `css: [...]` in the config).
 
 ---
+
+### Tables and scroll containers
+
+Docs often wrap wide tables (tokens, props, browser support) in a box with `overflow-x: auto`, or long lists in a box with a fixed height. Paper can't scroll, so a plain print cuts everything off that isn't visible.
+
+Before printing, every page is laid out at the real printable width (A4 minus margins ≈ 178 mm) and each scroll container is handled like this:
+
+| situation | what happens |
+| --- | --- |
+| box with fixed height and vertical scrolling | expanded, so every row is printed; long tables continue on the next page with the header row repeated |
+| box with horizontal scrolling | opened up |
+| content still wider than the page (that box, or any wide table) | made to fit, gentlest step first, stopping as soon as it fits: **1.** let cells wrap at spaces, **2.** allow breaks after `.` `/` `-` `_` `:` in values like `color.primary.default`, `--color-primary-default` or `Color/primary/Default` (version numbers like `1.0.0` stay together), **3.** scale only this element down, never below 65 %, **4.** as a last resort, break cell content anywhere |
+
+Nothing is cut off, and the rest of the page keeps its size. The toolbar's print button does the same and restores the page afterwards. For tables that are really wide, `--landscape` gives them more room.
 
 ## Choosing what goes into the PDF
 
@@ -341,7 +359,7 @@ All config file keys work here too. Pass `output: null` to get the bytes back wi
 
 1. **Serve.** The static build is served on a random local port, because Storybook can't run from `file://`.
 2. **Read the index.** It reads `index.json` (or `stories.json` from Storybook 6) and keeps the entries in sidebar order.
-3. **Render.** Each entry opens in `iframe.html?id=…&viewMode=docs|story` in headless Chromium (Playwright). It waits for Storybook's `docsRendered` / `storyRendered` event, network idle, fonts and images (lazy images are loaded too), and 400 ms without DOM changes, capped at 10 s so a restless page can't hang the export. Then it prints with the print stylesheet. A page that fails is reported and skipped, or fails the run with `--strict`.
+3. **Render.** Each entry opens in `iframe.html?id=…&viewMode=docs|story` in headless Chromium (Playwright), laid out at the printable width of the paper. It waits for Storybook's `docsRendered` / `storyRendered` event, network idle, fonts and images (lazy images are loaded too), and 400 ms without DOM changes, capped at 10 s so a restless page can't hang the export. Then scroll containers and wide tables are fitted to the page, and it prints with the print stylesheet. A page that fails is reported and skipped, or fails the run with `--strict`.
 4. **Assemble.** It renders the cover, TOC, back page, header and footer from your templates and merges everything with pdf-lib. TOC entries and `?path=/docs/…` links become internal jumps, and bookmarks are added.
 
 Everything runs on your machine or in your CI. No account, no upload, no API key.
