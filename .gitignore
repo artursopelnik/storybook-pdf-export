@@ -6,3 +6,7 @@ storybook-static/
 test/fixtures/storybook/node_modules/
 test/fixtures/storybook/storybook-static/
 test/fixtures/storybook/package-lock.json
+
+# IDE and local tooling
+.idea/
+graft/
