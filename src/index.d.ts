@@ -147,6 +147,18 @@ export interface ExportOptions {
   build?: boolean;
   /** Storybook config folder used for building. Default `.storybook`. */
   configDir?: string;
+  /**
+   * Fixed port for the local server that serves a static build. Default 0
+   * (a random free port). Useful when company policies only let the browser
+   * reach certain local ports.
+   */
+  port?: number;
+  /**
+   * Print every tab of tab sets (`role="tablist"` / `role="tab"`), one after
+   * another under its label, instead of only the active one. Default true.
+   * Opt out per tab set with the class `sb-print-no-fit`.
+   */
+  expandTabs?: boolean;
   /** Pages rendered in parallel. Default 4. */
   concurrency?: number;
   /** Per-page timeout in ms. Default 30000. */
@@ -177,7 +189,7 @@ export function defineConfig(config: ExportOptions | (() => ExportOptions | Prom
 export function normaliseIndex(json: unknown): Entry[];
 export function selectEntries(entries: Entry[], options?: Pick<ExportOptions, 'mode' | 'include' | 'exclude'>): Entry[];
 
-export const DEFAULTS: Readonly<Required<Pick<ExportOptions, 'output' | 'mode' | 'format' | 'landscape' | 'cover' | 'toc' | 'pageNumbers' | 'concurrency' | 'timeout' | 'delay' | 'strict'>>>;
+export const DEFAULTS: Readonly<Required<Pick<ExportOptions, 'output' | 'mode' | 'format' | 'landscape' | 'cover' | 'toc' | 'pageNumbers' | 'concurrency' | 'timeout' | 'delay' | 'strict' | 'expandTabs' | 'port'>>>;
 export const HOOKS: readonly string[];
 export const PRINT_CSS_PATH: string;
 export function esc(value: unknown): string;

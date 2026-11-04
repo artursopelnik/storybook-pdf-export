@@ -44,6 +44,8 @@ export const DEFAULTS = Object.freeze({
   strict: false,
   browser: 'auto',
   configDir: '.storybook',
+  expandTabs: true,
+  port: 0,
 });
 
 /**
@@ -221,6 +223,7 @@ function normaliseOptions(opts) {
     if (!Number.isFinite(o[key]) || o[key] < 0) throw new Error(`"${key}" must be a non-negative number.`);
   }
   o.concurrency = Math.max(1, Math.floor(o.concurrency));
+  if (!Number.isInteger(o.port) || o.port < 0 || o.port > 65535) throw new Error('"port" must be a whole number between 0 and 65535 (0 = random).');
   printableWidth(o); // throws on unknown formats / margin units before anything starts
   for (const [name, fn] of Object.entries(o.hooks)) {
     if (typeof fn !== 'function') throw new Error(`Hook "${name}" must be a function.`);
@@ -251,7 +254,7 @@ async function openSource(o) {
   const dir = resolve(o.cwd, o.source);
   const isBuild = existsSync(join(dir, 'iframe.html'));
   if (isBuild && o.build !== true) {
-    const server = await serveStatic(dir);
+    const server = await serveStatic(dir, { port: o.port });
     return { base: server.url, projectDir: dir, close: server.close };
   }
 
@@ -264,7 +267,7 @@ async function openSource(o) {
     );
   }
   const build = await buildStorybook({ cwd: o.cwd, configDir: o.configDir, log: o.log });
-  const server = await serveStatic(build.dir);
+  const server = await serveStatic(build.dir, { port: o.port });
   return {
     base: server.url,
     // The project's package.json sits next to where storybook-static would be.
@@ -317,7 +320,7 @@ async function renderEntries(context, { base, entries, css, pdfOptions, printWid
         const i = next++;
         const entry = entries[i];
         try {
-          let pdf = await renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay: o.delay, beforeRender: o.hooks.beforeRender });
+          let pdf = await renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay: o.delay, expandTabs: o.expandTabs, beforeRender: o.hooks.beforeRender });
           if (o.hooks.afterRender) pdf = (await o.hooks.afterRender({ entry, pdf })) ?? pdf;
           rendered[i] = await PDFDocument.load(pdf);
         } catch (error) {

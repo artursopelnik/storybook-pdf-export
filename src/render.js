@@ -4,6 +4,7 @@
  */
 import { entryLabel } from './util.js';
 import { fitForPrint } from './fit.js';
+import { expandTabs as expandTabsInPage, vectorizeMasks } from './prepare.js';
 
 /** How long the DOM has to stay unchanged before a page counts as rendered. */
 const QUIET_MS = 400;
@@ -33,7 +34,7 @@ export function listenForRender() {
 }
 
 /** Opens a docs page or story, waits until it is rendered and returns its PDF. */
-export async function renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay = 0, beforeRender }) {
+export async function renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay = 0, expandTabs = true, beforeRender }) {
   const viewMode = entry.type === 'docs' ? 'docs' : 'story';
   const url = new URL(`iframe.html?id=${encodeURIComponent(entry.id)}&viewMode=${viewMode}`, base);
 
@@ -51,11 +52,16 @@ export async function renderEntry(page, { base, entry, css, pdfOptions, printWid
     }, entryLabel(entry));
   }
 
+  // Paper can't click: show every tab, not just the active one. Before
+  // settling, so images and fonts in the revealed panels load too.
+  if (expandTabs) await page.evaluate(expandTabsInPage);
+
   await settle(page, delay);
 
   // Scroll containers can't scroll on paper: expand / open / scale them.
   await page.emulateMedia({ media: 'print' });
   try {
+    await page.evaluate(vectorizeMasks);
     await page.evaluate(fitForPrint, { width: printWidth });
     if (beforeRender) await beforeRender({ page, entry });
     return await page.pdf(pdfOptions);

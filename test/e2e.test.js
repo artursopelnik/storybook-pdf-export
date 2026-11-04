@@ -73,8 +73,8 @@ test('exports docs pages and story-only components with TOC, bookmarks and links
   const result = await run(t, { title: 'Fake DS', log: (m) => logs.push(m) });
   if (!result) return;
 
-  // Intro, Button docs, Badge story, Tables; Broken fails, Secret is tagged no-pdf.
-  assert.deepEqual(result.entries.map((e) => e.id), ['intro--docs', 'components-button--docs', 'components-badge--default', 'foundations-tables--docs']);
+  // Intro, Button docs, Badge story, Tables, Tabs; Broken fails, Secret is tagged no-pdf.
+  assert.deepEqual(result.entries.map((e) => e.id), ['intro--docs', 'components-button--docs', 'components-badge--default', 'foundations-tables--docs', 'foundations-tabs--docs']);
   assert.deepEqual(result.failed.map((f) => f.entry.id), ['components-broken--docs']);
   assert.match(result.failed[0].error.message, /Boom: component threw/);
 
@@ -82,7 +82,7 @@ test('exports docs pages and story-only components with TOC, bookmarks and links
   assert.equal(doc.getPageCount(), result.pages);
   assert.equal(doc.getTitle(), 'Fake DS');
 
-  assert.deepEqual(outline(doc), ['Intro', 'Components', '  Button', '  Badge', '    Default', 'Foundations', '  Tables']);
+  assert.deepEqual(outline(doc), ['Intro', 'Components', '  Button', '  Badge', '    Default', 'Foundations', '  Tables', '  Tabs']);
 
   const all = links(doc);
   // TOC (page 2) links to every bookmark target.
@@ -178,6 +178,8 @@ test('template errors name the template', async (t) => {
 });
 
 test('option validation', async () => {
+  await assert.rejects(exportPdf({ source: FIXTURE, port: 70000 }), /"port" must be/);
+  await assert.rejects(exportPdf({ source: FIXTURE, port: 1.5 }), /"port" must be/);
   await assert.rejects(exportPdf({}), /No Storybook source/);
   await assert.rejects(exportPdf({ source: FIXTURE, mode: 'everything' }), /Unknown mode/);
   await assert.rejects(exportPdf({ source: FIXTURE, concurrency: -1 }), /non-negative/);
@@ -231,6 +233,77 @@ test('scroll containers are expanded and wide tables fit the page', async (t) =>
   assert.equal(seen.pageWidth, 672, 'laid out at the printable width of A4 minus margins');
   assert.ok(seen.yExpanded, 'vertical scroll box shows all rows');
   assert.ok(seen.optOutUntouched, '.sb-print-no-fit is left alone');
+});
+
+/** Collects what the page looks like right before printing. */
+const inspectTabsPage = async (page) =>
+  page.evaluate(() => {
+    const docs = document.getElementById('storybook-docs');
+    const shown = (el) => el.getClientRects().length > 0;
+    const icon = getComputedStyle(document.getElementById('mask-icon'));
+    return {
+      text: docs.innerText,
+      tablistsShown: [...docs.querySelectorAll('#react-tabs [role="tablist"], #hidden-tabs [role="tablist"]')].map(shown),
+      keptTablistShown: shown(docs.querySelector('#kept-tabs [role="tablist"]')),
+      maskImage: icon.maskImage,
+      backgroundImage: decodeURIComponent(icon.backgroundImage),
+    };
+  });
+
+const count = (text, needle) => text.split(needle).length - 1;
+
+test('tabs are expanded: every tab is printed under its label', async (t) => {
+  let seen;
+  const result = await run(t, {
+    include: ['Foundations/Tabs'],
+    cover: false,
+    toc: false,
+    hooks: { beforeRender: async ({ page }) => { seen = await inspectTabsPage(page); } },
+  });
+  if (!result) return;
+  assert.equal(result.failed.length, 0);
+
+  // React-style tabs (inactive content not in the DOM) and hidden panels.
+  for (const content of ['Content of Overview', 'Content of Usage', 'Do content', 'Dont content']) {
+    assert.equal(count(seen.text, content), 1, `"${content}" printed once:\n${seen.text}`);
+  }
+  for (const label of ['Overview', 'Usage', 'Do', "Don't"]) assert.match(seen.text, new RegExp(`^${label}$`, 'm'), `label ${label}`);
+  assert.ok(!seen.text.includes('Content of Disabled'), 'disabled tabs are skipped');
+  assert.deepEqual(seen.tablistsShown, [false, false], 'tab bars are hidden');
+
+  // Opted out with .sb-print-no-fit: left as it is.
+  assert.ok(seen.keptTablistShown);
+  assert.ok(seen.text.includes('Kept A content') && !seen.text.includes('Kept B content'));
+});
+
+test('expandTabs: false prints only the active tab', async (t) => {
+  let seen;
+  const result = await run(t, {
+    include: ['Foundations/Tabs'],
+    cover: false,
+    toc: false,
+    expandTabs: false,
+    hooks: { beforeRender: async ({ page }) => { seen = await inspectTabsPage(page); } },
+  });
+  if (!result) return;
+  assert.ok(seen.text.includes('Content of Overview'));
+  assert.ok(!seen.text.includes('Content of Usage'));
+  assert.deepEqual(seen.tablistsShown, [true, true]);
+});
+
+test('CSS mask icons are printed as colored vector backgrounds (no hairline edges)', async (t) => {
+  let seen;
+  const result = await run(t, {
+    include: ['Foundations/Tabs'],
+    cover: false,
+    toc: false,
+    hooks: { beforeRender: async ({ page }) => { seen = await inspectTabsPage(page); } },
+  });
+  if (!result) return;
+  assert.equal(seen.maskImage, 'none');
+  assert.match(seen.backgroundImage, /^url\("data:image\/svg\+xml/);
+  assert.match(seen.backgroundImage, /fill="rgb\(200, 0, 0\)"/, 'recolored with the background color');
+  assert.ok(!seen.backgroundImage.includes('currentColor'));
 });
 
 test('a cover template that overflows is cut to one page', async (t) => {

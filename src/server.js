@@ -7,9 +7,11 @@ import { MIME } from './util.js';
 /**
  * Serves a static Storybook build on a random local port.
  * Storybook's iframe cannot be loaded from file:// (ES modules, fetch of
- * index.json), so a tiny HTTP server is needed. It only listens on 127.0.0.1.
+ * index.json), so a tiny HTTP server is needed. It only listens on 127.0.0.1,
+ * on a random free port unless `port` is given (some company setups only let
+ * the browser reach certain local ports).
  */
-export async function serveStatic(dir) {
+export async function serveStatic(dir, { port = 0 } = {}) {
   const root = resolve(dir);
 
   const server = createServer(async (req, res) => {
@@ -54,13 +56,15 @@ export async function serveStatic(dir) {
   });
 
   await new Promise((ok, fail) => {
-    server.once('error', fail);
-    server.listen(0, '127.0.0.1', ok);
+    server.once('error', (err) =>
+      fail(err.code === 'EADDRINUSE' ? new Error(`Port ${port} is already in use. Pick another --port, or leave it out for a random one.`) : err),
+    );
+    server.listen(port, '127.0.0.1', ok);
   });
 
-  const { port } = server.address();
+  const { port: actual } = server.address();
   return {
-    url: `http://127.0.0.1:${port}/`,
+    url: `http://127.0.0.1:${actual}/`,
     close: () =>
       new Promise((ok) => {
         server.closeAllConnections?.();

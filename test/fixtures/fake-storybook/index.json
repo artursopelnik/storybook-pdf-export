@@ -38,6 +38,13 @@
       "type": "docs",
       "tags": []
     },
+    "foundations-tabs--docs": {
+      "id": "foundations-tabs--docs",
+      "title": "Foundations/Tabs",
+      "name": "Docs",
+      "type": "docs",
+      "tags": []
+    },
     "components-broken--docs": {
       "id": "components-broken--docs",
       "title": "Components/Broken",

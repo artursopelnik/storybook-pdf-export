@@ -34,7 +34,52 @@
           ${Array.from({ length: 30 }, (_, i) => `<tr><td>row ${i}</td></tr>`).join('')}
         </table></div>
         <div id="opt-out" class="sb-print-no-fit" style="max-height:40px;overflow-y:auto">${lorem(10)}</div>`,
+      // React-style tabs (only the active panel is in the DOM, re-rendered
+      // asynchronously on click) and Radix-style tabs (all panels in the DOM,
+      // inactive ones `hidden`), plus a CSS mask icon.
+      'foundations-tabs--docs': `<h1>Tabs</h1>
+        <div id="react-tabs">
+          <div role="tablist">
+            <button role="tab" aria-selected="true" aria-controls="react-panel">Overview</button>
+            <button role="tab" aria-selected="false" aria-controls="react-panel">Usage</button>
+            <button role="tab" aria-selected="false" aria-controls="react-panel" disabled>Disabled</button>
+          </div>
+          <div role="tabpanel" id="react-panel"><p id="react-content">Content of Overview</p></div>
+        </div>
+        <div id="hidden-tabs">
+          <div role="tablist">
+            <button role="tab" aria-selected="true" aria-controls="do-panel">Do</button>
+            <button role="tab" aria-selected="false" aria-controls="dont-panel">Don't</button>
+          </div>
+          <div role="tabpanel" id="do-panel"><p>Do content</p></div>
+          <div role="tabpanel" id="dont-panel" hidden><p>Dont content</p></div>
+        </div>
+        <div id="kept-tabs" class="sb-print-no-fit">
+          <div role="tablist">
+            <button role="tab" aria-selected="true" aria-controls="kept-a">Kept A</button>
+            <button role="tab" aria-selected="false" aria-controls="kept-b">Kept B</button>
+          </div>
+          <div role="tabpanel" id="kept-a"><p>Kept A content</p></div>
+          <div role="tabpanel" id="kept-b" hidden><p>Kept B content</p></div>
+        </div>
+        <p><i id="mask-icon" style="display:inline-block;width:24px;height:24px;background-color:rgb(200, 0, 0);
+          mask-image:url(data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="currentColor"/></svg>')});
+          mask-repeat:no-repeat;mask-size:contain"></i></p>`,
     };
+    // Tab behaviour of the two fixtures above.
+    document.addEventListener('click', (event) => {
+      const tab = event.target.closest('[role="tab"]');
+      if (!tab || tab.disabled) return;
+      const list = tab.closest('[role="tablist"]');
+      for (const t of list.querySelectorAll('[role="tab"]')) t.setAttribute('aria-selected', String(t === tab));
+      if (tab.closest('#react-tabs')) {
+        setTimeout(() => {
+          document.getElementById('react-panel').innerHTML = `<p id="react-content">Content of ${tab.textContent}</p>`;
+        }, 50);
+      } else {
+        for (const t of list.querySelectorAll('[role="tab"]')) document.getElementById(t.getAttribute('aria-controls')).hidden = t !== tab;
+      }
+    });
     setTimeout(() => {
       document.body.classList.remove('sb-show-preparing-docs');
       if (id === 'components-broken--docs') {

@@ -52,6 +52,8 @@ Options
       --no-build    Never build; fail if there is no build
       --config-dir  Storybook config folder used for building (default: .storybook)
       --storybook-url  Public Storybook URL; links to stories not in the PDF point there
+      --no-expand-tabs  Print only the active tab of tab sets (default: every tab, under its label)
+      --port        Fixed port for the local server that serves the build (default: random)
   -c, --concurrency Pages rendered in parallel           (default: ${DEFAULTS.concurrency})
       --timeout     Per-page timeout in ms                (default: ${DEFAULTS.timeout})
       --delay       Extra wait per page in ms, e.g. for animations (default: 0)
@@ -89,6 +91,8 @@ const options = {
   build: { type: 'boolean' },
   'no-build': { type: 'boolean' },
   'config-dir': { type: 'string' },
+  'no-expand-tabs': { type: 'boolean' },
+  port: { type: 'string' },
   concurrency: { type: 'string', short: 'c' },
   timeout: { type: 'string' },
   delay: { type: 'string' },
@@ -157,6 +161,8 @@ async function main() {
     browserPath: fromCli(v['browser-path'] ?? v.chromium),
     build: v['no-build'] ? false : v.build,
     configDir: v['config-dir'],
+    expandTabs: v['no-expand-tabs'] ? false : undefined,
+    port: num(v.port, 'port'),
     concurrency: num(v.concurrency, 'concurrency'),
     timeout: num(v.timeout, 'timeout'),
     delay: num(v.delay, 'delay'),

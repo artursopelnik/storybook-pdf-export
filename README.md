@@ -67,7 +67,7 @@ That's it. If there is no `storybook-static` yet, the tool runs `storybook build
 
 ```bash
 npx storybook-pdf-export ./storybook-static -o design-system.pdf   # an existing build
-npx storybook-pdf-export http://localhost:6006 -o docs.pdf          # a running Storybook
+npx storybook-pdf-export http://localhost:6006 -o docs.pdf          # a served Storybook (static build is fastest)
 npx storybook-pdf-export https://design.acme.com/storybook/         # a deployed one
 ```
 
@@ -107,6 +107,23 @@ npx storybook-pdf-export --browser-path "C:\Program Files (x86)\Microsoft\Edge\A
 
 The same works as `browser` / `browserPath` in the config file, or with the environment variables `STORYBOOK_PDF_BROWSER` and `STORYBOOK_PDF_BROWSER_PATH`, which is handy in CI. Pre-release channels like `chrome-beta` or `msedge-dev` work too. Firefox and Safari can't be used, because only Chromium can print a page to PDF this way.
 
+#### Every page times out on a company machine?
+
+To read a static build, the tool serves it on `http://127.0.0.1:<random port>`. On company machines, browser policies, a proxy or security software sometimes block or stall that address (this has nothing to do with the browser version), so every page runs into the timeout and the export ends with "Nothing could be rendered". First try a fixed port, as some setups only allow certain ports:
+
+```bash
+npx storybook-pdf-export --browser msedge --port 6006
+```
+
+If that doesn't help either, serve the build yourself and pass the URL:
+
+```bash
+npx http-server storybook-static -p 6006 -c-1                 # terminal 1
+npx storybook-pdf-export http://localhost:6006 --browser msedge  # terminal 2
+```
+
+Use a static build here (`storybook build`), not the dev server (`storybook dev`): the dev server compiles each page on request and is far too slow for exporting many pages.
+
 ### Let your AI set it up
 
 Using **Claude Code** or **Cursor**? Open your project and say:
@@ -137,6 +154,29 @@ Everything here is plain config and CLI flags, so an assistant can wire it up fr
 ## Corporate design: themes, templates and hooks
 
 The PDF should look like *your* document, not like ours. Customization has three levels, and you can use as much or as little as you want. Put everything in a **`storybook-pdf.config.js`** in your project root. The CLI picks it up automatically, or you pass `--config path`.
+
+### Cover title and subtitle
+
+The cover shows a title, a subtitle and a meta line (version, date). On the command line:
+
+```bash
+npx storybook-pdf-export --title "My Design System" --subtitle "Storybook documentation"
+```
+
+Or once in `storybook-pdf.config.js`, then a plain `npx storybook-pdf-export` is enough:
+
+```js
+import { defineConfig } from 'storybook-pdf-export';
+
+export default defineConfig({
+  title: 'My Design System',
+  subtitle: 'Storybook documentation',
+  author: 'Design System Team',   // PDF metadata
+  version: '2.4.0',               // meta line on the cover
+});
+```
+
+Without `title`, the `name` from the `package.json` next to the build is used, and `version` comes from there too. When the source is a URL there is no `package.json` to read, so the title falls back to "Storybook": set `title` in that case. The title is also the PDF's document title.
 
 ### 1. Theme: colors, fonts, logo
 
@@ -316,6 +356,18 @@ Before printing, every page is laid out at the real printable width (A4 minus ma
 
 Nothing is cut off, and the rest of the page keeps its size. The toolbar's print button does the same and restores the page afterwards. For tables that are really wide, `--landscape` gives them more room.
 
+### Tabs
+
+Paper can't click, so tab sets would only show the active tab. Before printing, every tab set with the usual ARIA roles (`role="tablist"`, `role="tab"`, `role="tabpanel"`) is expanded: each tab is clicked in turn, its content copied, and all tabs are printed one after another, each under its label. The tab bar itself is hidden. This also works for tab components that only render the active panel, as most React tab components do. Disabled tabs are skipped.
+
+- Turn it off with `--no-expand-tabs` (or `expandTabs: false`), or for one tab set with the class `sb-print-no-fit` on it or a parent.
+- Restyle the labels with your own `--css`: `.sb-pdf-tab-label` (label), `.sb-pdf-tab` (one tab), `.sb-pdf-tabs` (all of them).
+- Tab components without ARIA roles aren't detected. Nested tab sets inside a tab show only their active tab.
+
+### Icons with CSS masks
+
+A common icon technique is an element with a `background-color` and an SVG as `mask-image`, so icons take the text color. Chromium prints masks with thin hairlines along the edges. So before printing, such icons are turned into the SVG itself, filled with the background color, as a sharp vector background. Nothing to do on your side; opt out with `sb-print-no-fit`. Only single-color SVG masks are converted, anything else is printed as it is.
+
 ## Choosing what goes into the PDF
 
 | `--mode`  | what ends up in the PDF                                          |
@@ -363,6 +415,8 @@ storybook-pdf-export [source] [options]
       --build         Always run "storybook build" first (into a temp folder)
       --no-build      Never build; fail if there is no build
       --config-dir    Storybook config folder used for building   (default: .storybook)
+      --port          Fixed port for the local server             (default: random)
+      --no-expand-tabs  Print only the active tab of tab sets     (default: every tab)
   -c, --concurrency   Pages rendered in parallel                  (default: 4)
       --timeout       Per-page timeout in ms                      (default: 30000)
       --delay         Extra wait per page in ms                   (default: 0)
