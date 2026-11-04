@@ -1,0 +1,69 @@
+{
+  "name": "storybook-pdf-export",
+  "version": "0.1.0",
+  "description": "Export a Storybook (docs pages and stories) into a single, print-friendly PDF with cover, table of contents, bookmarks and page numbers.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Artur Sopelnik",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/artursopelnik/storybook-pdf-export.git"
+  },
+  "keywords": [
+    "storybook",
+    "storybook-addon",
+    "pdf",
+    "export",
+    "print",
+    "design-system",
+    "documentation",
+    "chromatic",
+    "corporate-design",
+    "playwright"
+  ],
+  "bin": {
+    "storybook-pdf-export": "./src/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./preset": "./src/addon/preset.js",
+    "./manager": "./src/addon/manager.js",
+    "./print.css": "./src/print.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "playwright": "^1.50.0"
+  },
+  "peerDependencies": {
+    "storybook": "^8.0.0 || ^9.0.0 || ^10.0.0"
+  },
+  "peerDependenciesMeta": {
+    "storybook": {
+      "optional": true
+    }
+  },
+  "storybook": {
+    "displayName": "PDF Export",
+    "supportedFrameworks": [
+      "react",
+      "vue",
+      "angular",
+      "web-components",
+      "html",
+      "svelte",
+      "preact"
+    ]
+  }
+}

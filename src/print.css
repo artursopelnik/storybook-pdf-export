@@ -1,0 +1,261 @@
+/*
+ * storybook-pdf-export — print stylesheet for Storybook docs & stories.
+ *
+ * Used in two places:
+ *   1. Injected by the CLI into every page before it is rendered to PDF.
+ *   2. Injected by the addon preset into the preview iframe, so the
+ *      "Print" toolbar button (and Ctrl+P inside the iframe) look the same.
+ *
+ * Utility classes you can use in your MDX / components:
+ *   .sb-no-print     → hidden in print / PDF
+ *   .sb-print-only   → only visible in print / PDF
+ *   .sb-page-break   → forces a page break before the element
+ *   .sb-keep-together→ never split this element across pages
+ */
+
+.sb-print-only {
+  display: none !important;
+}
+
+@media print {
+  /* ---------- Page setup ------------------------------------------------ */
+
+  @page {
+    margin: 18mm 16mm 20mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    /* Keep color swatches, token tables and story backgrounds visible. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ---------- Utility classes ------------------------------------------- */
+
+  .sb-no-print {
+    display: none !important;
+  }
+
+  .sb-print-only {
+    display: revert !important;
+  }
+
+  .sb-page-break {
+    break-before: page;
+  }
+
+  .sb-keep-together {
+    break-inside: avoid;
+  }
+
+  /* ---------- Docs layout: use the full sheet --------------------------- */
+
+  .sbdocs-wrapper {
+    padding: 0 !important;
+    min-height: 0 !important;
+  }
+
+  .sbdocs-content {
+    max-width: none !important;
+    width: 100% !important;
+  }
+
+  /* A trailing margin can spill onto an otherwise empty last page. */
+  .sbdocs-content > :last-child {
+    margin-bottom: 0 !important;
+  }
+
+  /* Storybook's floating TOC and other interactive chrome. */
+  .sbdocs-toc--custom,
+  .toc-wrapper,
+  .docblock-code-toggle,
+  .docblock-source button,
+  .sbdocs-preview-actions,
+  .sbdocs-preview > :not(.docs-story):has([aria-label='Zoom in'], [aria-label='Reload story']),
+  .sb-bar,
+  [aria-label='Zoom in'],
+  [aria-label='Zoom out'],
+  [aria-label='Reset zoom'],
+  [title='Open canvas in new tab'],
+  .sb-errordisplay,
+  .sb-nopreview,
+  .sb-preparing-story,
+  .sb-preparing-docs,
+  body > textarea {
+    display: none !important;
+  }
+
+  /* ---------- Typography: fixed point sizes read better on paper -------- */
+
+  .sbdocs-content,
+  .sbdocs-content p,
+  .sbdocs-content li,
+  .sbdocs-content td,
+  .sbdocs-content th {
+    font-size: 11pt !important;
+    line-height: 1.45 !important;
+  }
+
+  .sbdocs-content h1,
+  .sbdocs-title {
+    font-size: 20pt !important;
+    line-height: 1.2 !important;
+    margin-top: 0 !important;
+  }
+
+  .sbdocs-content h2 {
+    font-size: 15pt !important;
+  }
+
+  .sbdocs-content h3 {
+    font-size: 13pt !important;
+  }
+
+  .sbdocs-content h4,
+  .sbdocs-content h5,
+  .sbdocs-content h6 {
+    font-size: 11.5pt !important;
+  }
+
+  .sbdocs-subtitle {
+    font-size: 12pt !important;
+  }
+
+  p,
+  li {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Never leave a heading alone at the bottom of a page. */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    break-after: avoid;
+    break-inside: avoid;
+  }
+
+  /* ---------- Links: readable in black & white -------------------------- */
+
+  .sbdocs-content a {
+    color: inherit !important;
+    text-decoration: underline !important;
+  }
+
+  /* Paper has no hyperlinks — print the target of external links. */
+  .sbdocs-content p a[href^='http']::after,
+  .sbdocs-content li a[href^='http']::after {
+    content: ' (' attr(href) ')';
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+
+  /* ---------- Code blocks ----------------------------------------------- */
+
+  /*
+   * Short blocks stay in one piece. Blocks longer than a page are split by
+   * the browser anyway; wrapping lines and removing the scroll container
+   * makes sure nothing is clipped off the right edge or the bottom.
+   */
+  pre,
+  .docblock-source {
+    break-inside: avoid;
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  /* Prism / react-syntax-highlighter set white-space: pre on inner spans. */
+  pre,
+  pre *,
+  .docblock-source * {
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere !important;
+    font-size: 8.5pt !important;
+    line-height: 1.4 !important;
+  }
+
+  .docblock-source,
+  .sbdocs-content pre {
+    border: 1px solid #c8c8c8 !important;
+    box-shadow: none !important;
+  }
+
+  /* MDX wraps fenced code in a <pre> around the source block: one frame is enough. */
+  .sbdocs-content pre:has(> .docblock-source) {
+    border: 0 !important;
+    padding: 0 !important;
+    background: none !important;
+  }
+
+  /* Scroll containers would cut content off on paper. */
+  .docblock-source *,
+  .os-host,
+  .os-viewport,
+  .os-content {
+    overflow: visible !important;
+    max-height: none !important;
+    height: auto !important;
+  }
+
+  /* ---------- Story previews (Canvas / Story blocks) -------------------- */
+
+  .sbdocs-preview {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border: 1px solid #c8c8c8 !important;
+    padding-top: 0 !important;
+  }
+
+  .docs-story {
+    border: 0 !important;
+    margin-top: 0 !important;
+  }
+
+  .docs-story > div {
+    overflow: visible !important;
+  }
+
+  /* ---------- Tables (ArgTypes / Controls / token tables) ---------------- */
+
+  table {
+    break-inside: auto;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr,
+  img,
+  svg,
+  figure {
+    break-inside: avoid;
+  }
+
+  .docblock-argstable {
+    box-shadow: none !important;
+  }
+
+  /* The "Control" column is interactive only and wastes width on paper. */
+  .docblock-argstable-head th:nth-child(4),
+  .docblock-argstable-body td:nth-child(4) {
+    display: none !important;
+  }
+
+  /* Reset-controls button in the table header. */
+  .docblock-argstable-head button {
+    display: none !important;
+  }
+
+  img,
+  video,
+  canvas {
+    max-width: 100% !important;
+    height: auto;
+  }
+}
