@@ -43,7 +43,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node test/run.mjs",
     "test:smoke": "npm --prefix test/fixtures/storybook install --no-audit --no-fund && npm --prefix test/fixtures/storybook run build && node test/smoke.mjs",
     "prepublishOnly": "npm test && npm run test:types",
     "test:types": "tsc -p test/types"
