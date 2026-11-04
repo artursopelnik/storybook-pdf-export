@@ -3,26 +3,89 @@
  * functions are self-contained on purpose: they are serialised and evaluated
  * in the page.
  *
+ * They walk the flat tree, so content inside open shadow roots (web
+ * components) and slotted children are found too.
+ *
  * Opt out per element with the class `sb-print-no-fit`.
  */
 
 /**
  * Paper can't click: print every tab of a tab set instead of only the active
- * one. Each tab is clicked in turn (so tabs that only render the active panel,
- * as most React tab components do, work too), its panel is copied, and the
- * copies are shown one after another, each under its tab label. The tab bar
- * and the live panels are hidden.
+ * one, each under its tab label, and hide the tab bar.
  *
- * Finds tab sets by their ARIA roles: `role="tablist"`, `role="tab"`,
- * `role="tabpanel"` (with `aria-controls` on the tabs, or a panel next to
- * the tab list).
+ * Tab sets are found by their ARIA roles: `role="tablist"`, `role="tab"`,
+ * `role="tabpanel"` (linked with `aria-controls`, or panels next to the tab
+ * list in the same order as the tabs).
+ *
+ *   - Every tab has its own panel in the DOM (inactive ones `hidden`, as in
+ *     most web components and Radix-style tabs): the panels are revealed
+ *     where they are.
+ *   - Only the active panel exists (most React tab components): each tab is
+ *     clicked in turn and its panel copied.
  *
  * @returns {Promise<{ tabsets: number, tabs: number }>}
  */
 export async function expandTabs({ quietMs = 150, maxMs = 3000 } = {}) {
+  const LABEL_CSS = `
+    .sb-pdf-tab + .sb-pdf-tab, * + .sb-pdf-tab-label { margin-top: 14pt; }
+    .sb-pdf-tab-label {
+      display: block; margin: 0 0 6pt; padding-bottom: 3pt; border-bottom: 1px solid #c8c8c8;
+      font: 600 10.5pt/1.3 system-ui, sans-serif; color: #222; break-after: avoid;
+    }`;
   const stats = { tabsets: 0, tabs: 0 };
+
+  // ---- Flat tree helpers (shadow roots + slots) ----------------------------
+  const childrenOf = (el) => {
+    if (el.shadowRoot) return [...el.shadowRoot.children];
+    if (el.localName === 'slot') {
+      const assigned = el.assignedElements({ flatten: true });
+      return assigned.length ? assigned : [...el.children];
+    }
+    return [...el.children];
+  };
+  /** All elements below `root` in rendering order; doesn't descend into elements matching `stop`. */
+  const descendants = (root, stop) => {
+    const out = [];
+    const visit = (el) => {
+      for (const child of childrenOf(el)) {
+        out.push(child);
+        if (!(stop && child.matches(stop))) visit(child);
+      }
+    };
+    visit(root);
+    return out;
+  };
+  const parentOf = (el) => el.assignedSlot ?? el.parentElement ?? el.parentNode?.host ?? null;
+  const closest = (el, selector) => {
+    for (let node = el; node; node = parentOf(node)) if (node.matches?.(selector)) return node;
+    return null;
+  };
+  const byId = (from, id) => {
+    if (!id) return null;
+    const local = from.getRootNode().getElementById?.(id);
+    if (local) return local;
+    return document.getElementById(id) ?? descendants(document.documentElement).find((el) => el.id === id) ?? null;
+  };
+
   const shown = (el) => el.getClientRects().length > 0;
   const hide = (el) => el.style.setProperty('display', 'none', 'important');
+
+  // print.css doesn't reach into shadow roots: give them the label styles.
+  const styled = new WeakSet();
+  const addStyles = (node) => {
+    const root = node.getRootNode();
+    if (!(root instanceof ShadowRoot) || styled.has(root)) return;
+    const style = document.createElement('style');
+    style.textContent = LABEL_CSS;
+    root.append(style);
+    styled.add(root);
+  };
+  const labelFor = (tab, i) => {
+    const label = document.createElement('div');
+    label.className = 'sb-pdf-tab-label';
+    label.textContent = (tab.innerText || tab.textContent || tab.getAttribute('aria-label') || tab.title || '').trim() || `Tab ${i + 1}`;
+    return label;
+  };
 
   // Waits until the DOM has stopped changing after a click (bounded).
   const quiet = () =>
@@ -58,33 +121,26 @@ export async function expandTabs({ quietMs = 150, maxMs = 3000 } = {}) {
     return clone;
   };
 
-  const lists = [...document.querySelectorAll('[role="tablist"]')].filter(
-    (list) => shown(list) && !list.closest('.sb-print-no-fit, .sb-pdf-tabs'),
-  );
+  // ---- 1. Every panel exists: reveal them in place --------------------------
+  const reveal = (tabs, panels) => {
+    tabs.forEach((tab, i) => {
+      const panel = panels[i];
+      panel.removeAttribute('hidden');
+      if (!shown(panel)) panel.style.setProperty('display', 'block', 'important');
+      const label = labelFor(tab, i);
+      // Right before the panel (not inside: panels can be flex / grid
+      // containers). A slotted panel's label goes into the same slot.
+      if (panel.slot) label.slot = panel.slot;
+      panel.before(label);
+      addStyles(label);
+    });
+  };
 
-  for (const list of lists) {
-    const tabs = [...list.querySelectorAll('[role="tab"]')].filter(
-      (tab) => tab.closest('[role="tablist"]') === list && !tab.disabled && tab.getAttribute('aria-disabled') !== 'true',
-    );
-    // A tab that is a real link would navigate away: leave such tab sets alone.
-    const navigates = tabs.some((tab) => tab.matches('a[href]') && !tab.getAttribute('href').startsWith('#'));
-    if (tabs.length < 2 || navigates) continue;
-
-    // The panel a tab shows: via aria-controls, else the visible panel next to the list.
-    const panelOf = (tab) => {
-      const id = tab.getAttribute('aria-controls');
-      const byId = id && document.getElementById(id);
-      if (byId) return byId;
-      for (let scope = list.parentElement; scope; scope = scope.parentElement) {
-        const panel = [...scope.querySelectorAll('[role="tabpanel"]')].find((p) => shown(p) && !p.closest('.sb-pdf-tabs'));
-        if (panel) return panel;
-      }
-      return null;
-    };
-
+  // ---- 2. Only the active panel exists: click each tab and copy ------------
+  const clickThrough = async (tabs, panelOf) => {
     const sections = [];
     const panels = new Set();
-    for (const tab of tabs) {
+    for (const [i, tab] of tabs.entries()) {
       if (tab.getAttribute('aria-selected') !== 'true') {
         tab.click();
         await quiet();
@@ -92,33 +148,60 @@ export async function expandTabs({ quietMs = 150, maxMs = 3000 } = {}) {
       const panel = panelOf(tab);
       if (!panel) continue;
       panels.add(panel);
-      const label = (tab.innerText || tab.getAttribute('aria-label') || tab.title || '').trim() || `Tab ${sections.length + 1}`;
-      sections.push({ label, content: copy(panel) });
+      sections.push({ label: labelFor(tab, i), content: copy(panel) });
     }
-    if (sections.length < 2) continue;
+    if (sections.length < 2) return 0;
 
     const container = document.createElement('div');
     container.className = 'sb-pdf-tabs';
     for (const { label, content } of sections) {
       const section = document.createElement('div');
       section.className = 'sb-pdf-tab';
-      const heading = document.createElement('div');
-      heading.className = 'sb-pdf-tab-label';
-      heading.textContent = label;
-      section.append(heading, content);
+      section.append(label, content);
       container.append(section);
     }
     const first = [...panels][0];
     first.parentNode.insertBefore(container, first);
-    hide(list);
+    addStyles(container);
     for (const panel of panels) hide(panel);
-    // Panels that belong to this tab set but weren't reached (e.g. disabled tabs).
-    for (const tab of list.querySelectorAll('[role="tab"]')) {
-      const other = tab.getAttribute('aria-controls') && document.getElementById(tab.getAttribute('aria-controls'));
-      if (other && !container.contains(other)) hide(other);
+    return sections.length;
+  };
+
+  const lists = descendants(document.body).filter(
+    (el) => el.matches('[role="tablist"]') && shown(el) && !closest(el, '.sb-print-no-fit, .sb-pdf-tabs'),
+  );
+
+  for (const list of lists) {
+    const all = descendants(list, '[role="tablist"]').filter((el) => el.matches('[role="tab"]'));
+    const tabs = all.filter((tab) => !tab.disabled && tab.getAttribute('aria-disabled') !== 'true');
+    // A tab that is a real link would navigate away: leave such tab sets alone.
+    const navigates = tabs.some((tab) => tab.matches('a[href]') && !tab.getAttribute('href').startsWith('#'));
+    if (tabs.length < 2 || navigates) continue;
+
+    // Panels next to the tab list: the nearest ancestor that has any.
+    let nearby = [];
+    for (let scope = parentOf(list); scope && !nearby.length; scope = parentOf(scope)) {
+      nearby = descendants(scope).filter((el) => el.matches('[role="tabpanel"]') && !closest(el, '.sb-pdf-tabs'));
     }
+    const linked = all.map((tab) => byId(tab, tab.getAttribute('aria-controls')));
+    // aria-controls for every tab, else panels in the same order as the tabs.
+    const panelsOfAll = linked.every(Boolean) ? linked : nearby.length === all.length ? nearby : null;
+    const panels = panelsOfAll && tabs.map((tab) => panelsOfAll[all.indexOf(tab)]);
+
+    let count;
+    if (panels && new Set(panels).size === panels.length) {
+      reveal(tabs, panels);
+      count = tabs.length;
+    } else {
+      const panelOf = (tab) => byId(tab, tab.getAttribute('aria-controls')) ?? nearby.find(shown) ?? null;
+      count = await clickThrough(tabs, panelOf);
+      if (!count) continue;
+    }
+    hide(list);
+    // Panels of disabled tabs stay out.
+    if (panelsOfAll) all.forEach((tab, i) => tabs.includes(tab) || hide(panelsOfAll[i]));
     stats.tabsets++;
-    stats.tabs += sections.length;
+    stats.tabs += count;
   }
   return stats;
 }
@@ -137,6 +220,22 @@ export async function expandTabs({ quietMs = 150, maxMs = 3000 } = {}) {
 export async function vectorizeMasks() {
   const TRANSPARENT = /^(transparent|rgba\(0, 0, 0, 0\))$/;
   const COMPLEX = 'parsererror, linearGradient, radialGradient, pattern, image, mask, filter, style, foreignObject';
+
+  // Every element, including those in open shadow roots.
+  const elements = [];
+  const collect = (root) => {
+    for (const el of root.querySelectorAll('*')) {
+      elements.push(el);
+      if (el.shadowRoot) collect(el.shadowRoot);
+    }
+  };
+  collect(document.body);
+  const optedOut = (el) => {
+    for (let node = el; node; node = node.parentElement ?? node.parentNode?.host) {
+      if (node.classList?.contains('sb-print-no-fit')) return true;
+    }
+    return false;
+  };
 
   const svgText = async (url) => {
     const data = url.match(/^data:([^,]*),(.*)$/s);
@@ -175,14 +274,13 @@ export async function vectorizeMasks() {
 
   const cache = new Map();
   let converted = 0;
-  for (const el of document.querySelectorAll('body *')) {
-    if (el.closest('.sb-print-no-fit')) continue;
+  for (const el of elements) {
     const cs = getComputedStyle(el);
     const mask = cs.maskImage && cs.maskImage !== 'none' ? cs.maskImage : cs.webkitMaskImage;
     if (!mask || mask === 'none') continue;
     const url = mask.match(/^url\("?(.*?)"?\)$/s)?.[1]; // one mask layer only
     const color = cs.backgroundColor;
-    if (!url || cs.backgroundImage !== 'none' || TRANSPARENT.test(color)) continue;
+    if (!url || cs.backgroundImage !== 'none' || TRANSPARENT.test(color) || optedOut(el)) continue;
 
     const key = `${color}|${url}`;
     if (!cache.has(key)) {

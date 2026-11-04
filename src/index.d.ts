@@ -155,7 +155,8 @@ export interface ExportOptions {
   port?: number;
   /**
    * Print every tab of tab sets (`role="tablist"` / `role="tab"`), one after
-   * another under its label, instead of only the active one. Default true.
+   * another under its label, instead of only the active one. Also finds tab
+   * sets in open shadow roots (web components). Default true.
    * Opt out per tab set with the class `sb-print-no-fit`.
    */
   expandTabs?: boolean;

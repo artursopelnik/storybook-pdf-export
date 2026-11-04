@@ -19,7 +19,8 @@
 
 /* Expanded tab sets (PDF export): every tab under its label. Restyle these
    classes in your own --css file if you like. */
-.sb-pdf-tab + .sb-pdf-tab {
+.sb-pdf-tab + .sb-pdf-tab,
+* + .sb-pdf-tab-label {
   margin-top: 14pt;
 }
 

@@ -358,15 +358,26 @@ Nothing is cut off, and the rest of the page keeps its size. The toolbar's print
 
 ### Tabs
 
-Paper can't click, so tab sets would only show the active tab. Before printing, every tab set with the usual ARIA roles (`role="tablist"`, `role="tab"`, `role="tabpanel"`) is expanded: each tab is clicked in turn, its content copied, and all tabs are printed one after another, each under its label. The tab bar itself is hidden. This also works for tab components that only render the active panel, as most React tab components do. Disabled tabs are skipped.
+Paper can't click, so tab sets would only show the active tab. Before printing, every tab set with the usual ARIA roles (`role="tablist"`, `role="tab"`, `role="tabpanel"`) is expanded: all tabs are printed one after another, each under its label, and the tab bar is hidden. Disabled tabs are skipped.
 
-- Turn it off with `--no-expand-tabs` (or `expandTabs: false`), or for one tab set with the class `sb-print-no-fit` on it or a parent.
-- Restyle the labels with your own `--css`: `.sb-pdf-tab-label` (label), `.sb-pdf-tab` (one tab), `.sb-pdf-tabs` (all of them).
-- Tab components without ARIA roles aren't detected. Nested tab sets inside a tab show only their active tab.
+It works with the common ways tabs are built:
+
+| tab component | what happens |
+| --- | --- |
+| **Web components / Shadow DOM** (Lit, Stencil, your own `<x-tabs>`): tabs and panels inside an open shadow root | found by walking open shadow roots; inactive panels (`hidden` or hidden by the component's CSS) are revealed in place |
+| **Light DOM panels slotted** into a web component (`<div slot="panel" role="tabpanel">`) | revealed in place; the label goes into the same slot |
+| **All panels in the DOM**, inactive ones `hidden` (Radix, Headless UI, plain HTML) | revealed in place |
+| **Only the active panel is rendered** (most React tab components) | each tab is clicked in turn and its content copied |
+
+Panels are matched to tabs through `aria-controls`, or by order when the panels sit next to the tab list.
+
+- Turn it off with `--no-expand-tabs` (or `expandTabs: false`), or for one tab set with the class `sb-print-no-fit` on it or on a parent (also on the host element of a web component).
+- Restyle the labels with your own `--css`: `.sb-pdf-tab-label` (label), `.sb-pdf-tab` / `.sb-pdf-tabs` (copied tabs). Labels inside a shadow root get their styles injected there, as page CSS doesn't reach into shadow roots.
+- Not covered: tab components without ARIA roles, closed shadow roots, and nested tab sets inside a tab that only renders its active panel (those show their active tab).
 
 ### Icons with CSS masks
 
-A common icon technique is an element with a `background-color` and an SVG as `mask-image`, so icons take the text color. Chromium prints masks with thin hairlines along the edges. So before printing, such icons are turned into the SVG itself, filled with the background color, as a sharp vector background. Nothing to do on your side; opt out with `sb-print-no-fit`. Only single-color SVG masks are converted, anything else is printed as it is.
+A common icon technique is an element with a `background-color` and an SVG as `mask-image`, so icons take the text color. Chromium prints masks with thin hairlines along the edges. So before printing, such icons are turned into the SVG itself, filled with the background color, as a sharp vector background, also inside shadow roots of web components. Nothing to do on your side; opt out with `sb-print-no-fit`. Only single-color SVG masks are converted, anything else is printed as it is.
 
 ## Choosing what goes into the PDF
 

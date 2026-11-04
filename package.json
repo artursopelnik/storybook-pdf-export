@@ -1,6 +1,6 @@
 {
   "name": "storybook-pdf-export",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Export a Storybook (docs pages and stories) into a single, print-friendly PDF with cover, table of contents, bookmarks and page numbers.",
   "type": "module",
   "license": "MIT",

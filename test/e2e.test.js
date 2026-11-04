@@ -235,18 +235,39 @@ test('scroll containers are expanded and wide tables fit the page', async (t) =>
   assert.ok(seen.optOutUntouched, '.sb-print-no-fit is left alone');
 });
 
-/** Collects what the page looks like right before printing. */
+/** Collects what the page looks like right before printing (shadow DOM included). */
 const inspectTabsPage = async (page) =>
   page.evaluate(() => {
     const docs = document.getElementById('storybook-docs');
     const shown = (el) => el.getClientRects().length > 0;
-    const icon = getComputedStyle(document.getElementById('mask-icon'));
+    // Visible text in the flat tree: shadow roots and slotted children, one line per text node.
+    const lines = [];
+    const walk = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (node.data.trim() && shown(node.parentElement)) lines.push(node.data.trim());
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE || ['STYLE', 'SCRIPT'].includes(node.tagName)) return;
+      if (node.localName === 'slot') return node.assignedNodes({ flatten: true }).forEach(walk);
+      if (!shown(node)) return;
+      (node.shadowRoot ? node.shadowRoot.childNodes : node.childNodes).forEach(walk);
+    };
+    walk(docs);
+    const shadow = (id) => docs.querySelector(`#${id}`).shadowRoot;
+    const iconStyle = (el) => {
+      const cs = getComputedStyle(el);
+      return { maskImage: cs.maskImage, backgroundImage: decodeURIComponent(cs.backgroundImage) };
+    };
     return {
-      text: docs.innerText,
-      tablistsShown: [...docs.querySelectorAll('#react-tabs [role="tablist"], #hidden-tabs [role="tablist"]')].map(shown),
+      text: lines.join('\n'),
+      tablistsShown: [
+        ...docs.querySelectorAll('#react-tabs [role="tablist"], #hidden-tabs [role="tablist"]'),
+        shadow('shadow-tabs').querySelector('[role="tablist"]'),
+        shadow('slotted-tabs').querySelector('[role="tablist"]'),
+      ].map(shown),
       keptTablistShown: shown(docs.querySelector('#kept-tabs [role="tablist"]')),
-      maskImage: icon.maskImage,
-      backgroundImage: decodeURIComponent(icon.backgroundImage),
+      ...iconStyle(document.getElementById('mask-icon')),
+      shadowIcon: iconStyle(shadow('shadow-tabs').getElementById('shadow-icon')),
     };
   });
 
@@ -264,12 +285,17 @@ test('tabs are expanded: every tab is printed under its label', async (t) => {
   assert.equal(result.failed.length, 0);
 
   // React-style tabs (inactive content not in the DOM) and hidden panels.
-  for (const content of ['Content of Overview', 'Content of Usage', 'Do content', 'Dont content']) {
+  // Web components: tabs and panels in the shadow DOM, or panels slotted in.
+  const contents = ['Content of Overview', 'Content of Usage', 'Do content', 'Dont content',
+    'Shadow Alpha content', 'Shadow Beta content', 'Shadow Gamma content', 'Slotted One content', 'Slotted Two content'];
+  for (const content of contents) {
     assert.equal(count(seen.text, content), 1, `"${content}" printed once:\n${seen.text}`);
   }
-  for (const label of ['Overview', 'Usage', 'Do', "Don't"]) assert.match(seen.text, new RegExp(`^${label}$`, 'm'), `label ${label}`);
+  for (const label of ['Overview', 'Usage', 'Do', "Don't", 'Alpha', 'Beta', 'Gamma', 'One', 'Two']) {
+    assert.equal(seen.text.split('\n').filter((l) => l === label).length, 1, `label ${label} once:\n${seen.text}`);
+  }
   assert.ok(!seen.text.includes('Content of Disabled'), 'disabled tabs are skipped');
-  assert.deepEqual(seen.tablistsShown, [false, false], 'tab bars are hidden');
+  assert.deepEqual(seen.tablistsShown, [false, false, false, false], 'tab bars are hidden');
 
   // Opted out with .sb-print-no-fit: left as it is.
   assert.ok(seen.keptTablistShown);
@@ -288,7 +314,8 @@ test('expandTabs: false prints only the active tab', async (t) => {
   if (!result) return;
   assert.ok(seen.text.includes('Content of Overview'));
   assert.ok(!seen.text.includes('Content of Usage'));
-  assert.deepEqual(seen.tablistsShown, [true, true]);
+  assert.ok(!seen.text.includes('Shadow Beta content'));
+  assert.deepEqual(seen.tablistsShown, [true, true, true, true]);
 });
 
 test('CSS mask icons are printed as colored vector backgrounds (no hairline edges)', async (t) => {
@@ -304,6 +331,8 @@ test('CSS mask icons are printed as colored vector backgrounds (no hairline edge
   assert.match(seen.backgroundImage, /^url\("data:image\/svg\+xml/);
   assert.match(seen.backgroundImage, /fill="rgb\(200, 0, 0\)"/, 'recolored with the background color');
   assert.ok(!seen.backgroundImage.includes('currentColor'));
+  assert.equal(seen.shadowIcon.maskImage, 'none', 'icons in shadow roots too');
+  assert.match(seen.shadowIcon.backgroundImage, /fill="rgb\(0, 0, 200\)"/);
 });
 
 test('a cover template that overflows is cut to one page', async (t) => {

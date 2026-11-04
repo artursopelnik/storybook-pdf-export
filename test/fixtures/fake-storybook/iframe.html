@@ -62,10 +62,41 @@
           <div role="tabpanel" id="kept-a"><p>Kept A content</p></div>
           <div role="tabpanel" id="kept-b" hidden><p>Kept B content</p></div>
         </div>
+        <k-tabs id="shadow-tabs" labels='["Alpha","Beta","Gamma"]'></k-tabs>
+        <k-slotted-tabs id="slotted-tabs">
+          <div role="tabpanel" slot="panel" id="slotted-one"><p>Slotted One content</p></div>
+          <div role="tabpanel" slot="panel" id="slotted-two" hidden><p>Slotted Two content</p></div>
+        </k-slotted-tabs>
         <p><i id="mask-icon" style="display:inline-block;width:24px;height:24px;background-color:rgb(200, 0, 0);
           mask-image:url(data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="currentColor"/></svg>')});
           mask-repeat:no-repeat;mask-size:contain"></i></p>`,
     };
+    // Web component tabs: everything in the shadow DOM, inactive panels `hidden`
+    // (the shadow style forces that with !important), plus a mask icon in there.
+    const iconSvg = btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>');
+    customElements.define('k-tabs', class extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const labels = JSON.parse(this.getAttribute('labels'));
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `<style>[hidden] { display: none !important; } .panel { display: flex; }</style>
+          <div role="tablist">${labels.map((l, i) => `<button role="tab" aria-selected="${i === 0}" aria-controls="p${i}">${l}</button>`).join('')}</div>
+          ${labels.map((l, i) => `<div class="panel" role="tabpanel" id="p${i}" ${i ? 'hidden' : ''}><p>Shadow ${l} content</p></div>`).join('')}
+          <i id="shadow-icon" style="display:inline-block;width:24px;height:24px;background-color:rgb(0, 0, 200);
+            -webkit-mask-image:url(data:image/svg+xml;base64,${iconSvg});mask-image:url(data:image/svg+xml;base64,${iconSvg})"></i>`;
+      }
+    });
+    // Tabs in the shadow DOM, panels in the light DOM, slotted in.
+    customElements.define('k-slotted-tabs', class extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `<div role="tablist">
+            <button role="tab" aria-selected="true">One</button>
+            <button role="tab" aria-selected="false">Two</button>
+          </div><slot name="panel"></slot>`;
+      }
+    });
     // Tab behaviour of the two fixtures above.
     document.addEventListener('click', (event) => {
       const tab = event.target.closest('[role="tab"]');
