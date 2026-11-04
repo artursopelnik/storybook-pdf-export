@@ -8,6 +8,7 @@
  */
 import { readFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
+import { MIME } from './util.js';
 
 /** Marker URL used in the TOC, rewritten into internal PDF links afterwards. */
 export const PAGE_LINK = 'https://storybook-pdf-export.invalid/page/';
@@ -31,14 +32,12 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-const MIME = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' };
-
 /** Local logo files are inlined as data URIs so the templates stay self-contained. */
 export async function resolveLogo(logo, cwd = process.cwd()) {
   if (!logo || /^(https?:|data:)/i.test(logo)) return logo ?? null;
   const file = resolve(cwd, logo);
   const type = MIME[extname(file).toLowerCase()];
-  if (!type) throw new Error(`Unsupported logo format: ${logo} (use svg, png, jpg, webp or gif)`);
+  if (!type?.startsWith('image/')) throw new Error(`Unsupported logo format: ${logo} (use svg, png, jpg, webp or gif)`);
   return `data:${type};base64,${(await readFile(file)).toString('base64')}`;
 }
 
@@ -85,7 +84,7 @@ export const BASE_CSS = `
 
 export function cover(ctx) {
   return `<section class="cover">
-    ${ctx.logo ? `<img class="logo" src="${ctx.logo}" alt="">` : ''}
+    ${ctx.logo ? `<img class="logo" src="${esc(ctx.logo)}" alt="">` : ''}
     <h1>${esc(ctx.title)}</h1>
     ${ctx.subtitle ? `<p>${esc(ctx.subtitle)}</p>` : ''}
     <div class="meta">${[ctx.version && `Version ${esc(ctx.version)}`, esc(ctx.dateText), ctx.author && esc(ctx.author)].filter(Boolean).join(' · ')}</div>
@@ -125,29 +124,44 @@ export function back() {
 
 export const DEFAULT_TEMPLATES = { cover, toc, header, footer, back, css: '' };
 
-/** Wraps a template's body in a full HTML document with print + theme CSS. */
-export function documentHtml(body, { printCss = '', theme, templateCss = '', margin, fullBleed = false }) {
-  const vars =
-    (margin
-      ? `:root { --pdf-margin-top: ${margin.top}; --pdf-margin-right: ${margin.right}; --pdf-margin-bottom: ${margin.bottom}; --pdf-margin-left: ${margin.left}; }`
-      : '') + (fullBleed ? '@page { margin: 0; }' : '');
+function marginVars(margin) {
+  return margin
+    ? `:root { --pdf-margin-top: ${margin.top}; --pdf-margin-right: ${margin.right}; --pdf-margin-bottom: ${margin.bottom}; --pdf-margin-left: ${margin.left}; }`
+    : '';
+}
+
+/** Shared document shell: optional print CSS, theme variables, base and template CSS. */
+function htmlDocument(body, { printCss = '', theme, templateCss = '', margin, extraCss = '' }) {
   return `<!doctype html><html><head><meta charset="utf-8">
-<style>${printCss}</style><style>${themeCss(theme)}${vars}</style><style>${BASE_CSS}</style><style>${templateCss}</style>
+<style>${printCss}</style>
+<style>${themeCss(theme)}${marginVars(margin)}</style>
+<style>${BASE_CSS}</style>
+<style>${templateCss}</style>
+<style>${extraCss}</style>
 </head><body>${body}</body></html>`;
+}
+
+/**
+ * Wraps a template's body in a full HTML document with print + theme CSS.
+ * `fullBleed` drops the page margins (used for the cover).
+ */
+export function documentHtml(body, { fullBleed = false, ...options }) {
+  return htmlDocument(body, { ...options, extraCss: fullBleed ? '@page { margin: 0; }' : '' });
 }
 
 /**
  * One HTML document with one sheet per PDF page, holding the running header
  * and footer. It is rendered once and laid over the merged pages.
  */
-export function overlayHtml(pages, { widthPt, heightPt, margin, theme, templateCss = '' }) {
-  return `<!doctype html><html><head><meta charset="utf-8">
-<style>${themeCss(theme)}</style><style>${BASE_CSS}</style><style>${templateCss}</style>
-<style>
-  @page { size: ${widthPt}pt ${heightPt}pt; margin: 0; }
-  html, body { background: transparent !important; }
-  :root { --pdf-margin-left: ${margin.left}; --pdf-margin-right: ${margin.right}; --pdf-margin-top: ${margin.top}; --pdf-margin-bottom: ${margin.bottom}; }
-  .sheet { position: relative; width: ${widthPt}pt; height: ${heightPt}pt; overflow: hidden; break-after: page; }
-  .sheet:last-child { break-after: auto; }
-</style></head><body>${pages.map((p) => `<div class="sheet">${p}</div>`).join('')}</body></html>`;
+export function overlayHtml(pages, { widthPt, heightPt, ...options }) {
+  const sheets = pages.map((p) => `<div class="sheet">${p}</div>`).join('');
+  return htmlDocument(sheets, {
+    ...options,
+    printCss: '',
+    extraCss: `
+      @page { size: ${widthPt}pt ${heightPt}pt; margin: 0; }
+      html, body { background: transparent !important; }
+      .sheet { position: relative; width: ${widthPt}pt; height: ${heightPt}pt; overflow: hidden; break-after: page; }
+      .sheet:last-child { break-after: auto; }`,
+  });
 }

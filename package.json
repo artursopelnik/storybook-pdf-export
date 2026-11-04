@@ -25,7 +25,10 @@
     "storybook-pdf-export": "./src/cli.js"
   },
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
     "./preset": "./src/addon/preset.js",
     "./manager": "./src/addon/manager.js",
     "./print.css": "./src/print.css",
@@ -40,7 +43,10 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\""
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:smoke": "npm --prefix test/fixtures/storybook install --no-audit --no-fund && npm --prefix test/fixtures/storybook run build && node test/smoke.mjs",
+    "prepublishOnly": "npm test && npm run test:types",
+    "test:types": "tsc -p test/types"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",
@@ -65,5 +71,14 @@
       "svelte",
       "preact"
     ]
+  },
+  "types": "./src/index.d.ts",
+  "bugs": {
+    "url": "https://github.com/artursopelnik/storybook-pdf-export/issues"
+  },
+  "homepage": "https://github.com/artursopelnik/storybook-pdf-export#readme",
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^5.9.3"
   }
 }

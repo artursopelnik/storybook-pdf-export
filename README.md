@@ -188,6 +188,8 @@ export default defineConfig({
 });
 ```
 
+Paths in the config file (`source`, `output`, `css`, `theme.logo`) are relative to the config file. Paths on the command line are relative to the working directory. Typos in option, theme, template or hook names are reported as warnings. The package ships TypeScript types, so `defineConfig` gives you autocompletion in VS Code even in a plain `.js` config.
+
 A complete example lives in [`examples/corporate`](examples/corporate/storybook-pdf.config.js). It produced the PDF in the preview above.
 
 ---
@@ -325,13 +327,21 @@ const { pages, entries, failed } = await exportPdf({
 
 All config file keys work here too. Pass `output: null` to get the bytes back without writing a file.
 
+**Links in your docs**
+
+| link in your MDX / docs                      | in the PDF                                                       |
+| -------------------------------------------- | ---------------------------------------------------------------- |
+| to a docs page or story that is in the PDF    | jumps to its page                                                |
+| to a story that is *not* in the PDF          | points to `--storybook-url`; without it, the link is removed, because it would point at a temporary local server |
+| to an external site                          | stays a normal link, and the URL is printed after it              |
+
 ---
 
 ## How it works
 
 1. **Serve.** The static build is served on a random local port, because Storybook can't run from `file://`.
 2. **Read the index.** It reads `index.json` (or `stories.json` from Storybook 6) and keeps the entries in sidebar order.
-3. **Render.** Each entry opens in `iframe.html?id=…&viewMode=docs|story` in headless Chromium (Playwright). It waits for Storybook's `docsRendered` / `storyRendered` event, network idle, fonts, images, and 400 ms without DOM changes. Then it prints with the print stylesheet.
+3. **Render.** Each entry opens in `iframe.html?id=…&viewMode=docs|story` in headless Chromium (Playwright). It waits for Storybook's `docsRendered` / `storyRendered` event, network idle, fonts and images (lazy images are loaded too), and 400 ms without DOM changes, capped at 10 s so a restless page can't hang the export. Then it prints with the print stylesheet. A page that fails is reported and skipped, or fails the run with `--strict`.
 4. **Assemble.** It renders the cover, TOC, back page, header and footer from your templates and merges everything with pdf-lib. TOC entries and `?path=/docs/…` links become internal jumps, and bookmarks are added.
 
 Everything runs on your machine or in your CI. No account, no upload, no API key.
@@ -347,8 +357,16 @@ Everything runs on your machine or in your CI. No account, no upload, no API key
 
 ```bash
 npm install
-npm test
+npx playwright install chromium
+
+npm test             # unit tests + end-to-end tests against a fake Storybook build
+npm run test:smoke   # builds a real Storybook 10 (test/fixtures/storybook) and checks the export
+npm run test:types   # type definitions
 ```
+
+The end-to-end tests are skipped locally when no browser is available (they never are on CI). To use an existing Chrome instead of Playwright's, set `STORYBOOK_PDF_CHROMIUM=/path/to/chrome`.
+
+CI runs the tests on Node 20, 22 and 24 on Linux, plus Windows and macOS, along with the smoke test, the type check and a package dry-run.
 
 Issues and pull requests are welcome.
 

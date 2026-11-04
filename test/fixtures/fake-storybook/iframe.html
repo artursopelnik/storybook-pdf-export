@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- Minimal stand-in for a Storybook preview iframe: same body classes,
+     same root elements, same channel events. Used by test/e2e.test.js. -->
+<html>
+<head><meta charset="utf-8"><title>fake storybook</title></head>
+<body class="sb-show-preparing-docs">
+  <div class="sb-errordisplay sb-wrapper"><div id="error-message"></div></div>
+  <div id="storybook-root"></div>
+  <div id="storybook-docs"></div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const id = params.get('id');
+    const viewMode = params.get('viewMode');
+    const listeners = {};
+    window.__STORYBOOK_ADDONS_CHANNEL__ = {
+      on(event, fn) { (listeners[event] ??= []).push(fn); },
+      emit(event) { (listeners[event] ?? []).forEach((fn) => fn()); },
+    };
+    const lorem = (n) => Array.from({ length: n }, (_, i) => `<p>Paragraph ${i + 1}. Lorem ipsum dolor sit amet.</p>`).join('');
+    const docs = {
+      'intro--docs': `<h1>Intro</h1>
+        <p><a id="to-button" href="?path=/docs/components-button--docs">Button docs</a>,
+           <a id="to-missing" href="?path=/docs/internal-secret--docs">secret page</a>,
+           <a href="https://example.com/">external</a></p>
+        <div class="sb-print-only">print only</div>
+        ${lorem(60)}
+        <img loading="lazy" src="pixel.svg" width="40" height="40" alt="">`,
+      'components-button--docs': `<h1>Button</h1><div class="sbdocs-preview"><div class="docs-story"><button>Primary</button></div></div>`,
+    };
+    setTimeout(() => {
+      document.body.classList.remove('sb-show-preparing-docs');
+      if (id === 'components-broken--docs') {
+        document.body.classList.add('sb-show-errordisplay');
+        document.getElementById('error-message').textContent = 'Boom: component threw';
+        return;
+      }
+      if (viewMode === 'docs') {
+        document.body.classList.add('sb-show-main');
+        document.getElementById('storybook-docs').innerHTML =
+          `<div class="sbdocs sbdocs-wrapper"><div class="sbdocs sbdocs-content">${docs[id] ?? '<h1>Unknown</h1>'}</div></div>`;
+        window.__STORYBOOK_ADDONS_CHANNEL__.emit('docsRendered');
+      } else {
+        document.body.classList.add('sb-show-main');
+        document.getElementById('storybook-root').innerHTML = `<span class="story">${id}</span>`;
+        window.__STORYBOOK_ADDONS_CHANNEL__.emit('storyRendered');
+      }
+    }, 30);
+  </script>
+</body>
+</html>

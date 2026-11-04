@@ -3,3 +3,6 @@ node_modules/
 !test/fixture/**/*.pdf
 storybook-static/
 .DS_Store
+test/fixtures/storybook/node_modules/
+test/fixtures/storybook/storybook-static/
+test/fixtures/storybook/package-lock.json

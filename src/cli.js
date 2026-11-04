@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { exportPdf, DEFAULTS } from './index.js';
+import { isUrl } from './util.js';
 
 const CONFIG_FILES = ['storybook-pdf.config.js', 'storybook-pdf.config.mjs'];
 
@@ -115,21 +116,24 @@ async function main() {
 
   const { config, path: configPath } = await loadConfig(v.config);
   if (configPath) log(`Using config ${configPath}`);
-  const output = v.output ?? config.output ?? DEFAULTS.output;
-  const list = (cli, key) => (cli?.length ? cli : config[key]);
+
+  // Paths from the config file are relative to the config file, paths given on
+  // the command line are relative to the working directory.
+  const fromCli = (p) => (p == null || isUrl(p) ? p : resolve(p));
+  const listFromCli = (values) => (values?.length ? values.map(fromCli) : undefined);
 
   // CLI flags win over the config file; flags that weren't given fall back to it.
   const flags = {
     cwd: configPath ? dirname(configPath) : process.cwd(),
-    source: positionals[0] ?? config.source ?? './storybook-static',
-    output,
+    source: fromCli(positionals[0]) ?? config.source ?? './storybook-static',
+    output: fromCli(v.output),
     title: v.title,
     subtitle: v.subtitle,
     author: v.author,
     mode: v.mode,
-    include: list(v.include, 'include'),
-    exclude: list(v.exclude, 'exclude'),
-    css: list(v.css, 'css'),
+    include: v.include,
+    exclude: v.exclude,
+    css: listFromCli(v.css),
     format: v.format,
     landscape: v.landscape,
     cover: v['no-cover'] ? false : undefined,
@@ -149,6 +153,7 @@ async function main() {
   });
 
   const secs = ((Date.now() - started) / 1000).toFixed(1);
+  const output = v.output ?? config.output ?? DEFAULTS.output;
   log(`\n✓ Wrote ${output} — ${result.pages} pages, ${result.entries.length} entries in ${secs}s`);
   if (result.failed.length) {
     console.warn(`⚠ ${result.failed.length} entr${result.failed.length === 1 ? 'y was' : 'ies were'} skipped because they failed to render.`);

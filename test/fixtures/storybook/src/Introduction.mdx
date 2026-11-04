@@ -1,0 +1,35 @@
+import { Meta } from '@storybook/addon-docs/blocks';
+
+<Meta title="Introduction" />
+
+# ACME Design System
+
+Welcome! See the [Button](?path=/docs/components-forms-button--docs) docs, or read about [print CSS](https://brennenputh.me/blog/printable-websites/).
+
+## Colors
+
+<div style={{display:'flex',gap:8}}>
+  {['#1ea7fd','#ff4785','#66bf3c','#fc521f','#333'].map(c => <div key={c} style={{width:80,height:60,background:c,borderRadius:6}} />)}
+</div>
+
+## Usage
+
+```jsx
+import { Button } from '@acme/ui';
+
+export function Toolbar() {
+  return (
+    <div className="toolbar">
+      <Button primary label="Save" onClick={() => save({ draft: false, notify: true, reason: 'User clicked the primary save button in the toolbar' })} />
+      <Button label="Cancel" />
+    </div>
+  );
+}
+```
+
+<div className="sb-print-only">This line only appears in print.</div>
+<div className="sb-no-print">This line never appears in print.</div>
+
+## Long section
+
+{Array.from({length: 40}, (_, i) => <p key={i}>Paragraph {i + 1}. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>)}

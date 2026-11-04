@@ -2,44 +2,23 @@ import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve, sep } from 'node:path';
-
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.mjs': 'text/javascript; charset=utf-8',
-  '.cjs': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.mp4': 'video/mp4',
-  '.webm': 'video/webm',
-  '.txt': 'text/plain; charset=utf-8',
-  '.pdf': 'application/pdf',
-  '.wasm': 'application/wasm',
-};
+import { MIME } from './util.js';
 
 /**
  * Serves a static Storybook build on a random local port.
  * Storybook's iframe cannot be loaded from file:// (ES modules, fetch of
- * index.json), so a tiny HTTP server is needed.
+ * index.json), so a tiny HTTP server is needed. It only listens on 127.0.0.1.
  */
 export async function serveStatic(dir) {
   const root = resolve(dir);
 
   const server = createServer(async (req, res) => {
     try {
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { Allow: 'GET, HEAD' }).end();
+        return;
+      }
+
       const url = new URL(req.url, 'http://localhost');
       let pathname = decodeURIComponent(url.pathname);
       if (pathname.endsWith('/')) pathname += 'index.html';
@@ -51,7 +30,7 @@ export async function serveStatic(dir) {
       }
 
       const info = await stat(file).catch(() => null);
-      if (!info || !info.isFile()) {
+      if (!info?.isFile()) {
         res.writeHead(404).end('Not found');
         return;
       }
@@ -60,9 +39,17 @@ export async function serveStatic(dir) {
         'Content-Type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
         'Content-Length': info.size,
       });
-      createReadStream(file).pipe(res);
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
+      createReadStream(file)
+        .on('error', () => res.destroy())
+        .pipe(res);
     } catch {
-      res.writeHead(500).end();
+      // Malformed URI escapes and similar end up here.
+      if (!res.headersSent) res.writeHead(400);
+      res.end();
     }
   });
 
@@ -74,6 +61,10 @@ export async function serveStatic(dir) {
   const { port } = server.address();
   return {
     url: `http://127.0.0.1:${port}/`,
-    close: () => new Promise((ok) => server.close(() => ok())),
+    close: () =>
+      new Promise((ok) => {
+        server.closeAllConnections?.();
+        server.close(() => ok());
+      }),
   };
 }

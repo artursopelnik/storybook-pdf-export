@@ -1,0 +1,19 @@
+{
+  "name": "storybook-pdf-export-fixture",
+  "private": true,
+  "type": "module",
+  "description": "Real Storybook used by test/smoke.mjs to check the export against Storybook's actual DOM.",
+  "scripts": {
+    "build": "storybook build --quiet -o storybook-static"
+  },
+  "devDependencies": {
+    "@storybook/addon-docs": "^10.0.0",
+    "@storybook/react-vite": "^10.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "storybook": "^10.0.0",
+    "storybook-pdf-export": "file:../../..",
+    "vite": "^8.0.0"
+  }
+}

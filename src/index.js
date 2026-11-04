@@ -5,11 +5,14 @@ import { fileURLToPath } from 'node:url';
 import * as PDFLib from 'pdf-lib';
 
 import { serveStatic } from './server.js';
-import { normaliseIndex, selectEntries, buildTree } from './entries.js';
+import { normaliseIndex, selectEntries, buildTree, assertMode } from './entries.js';
 import * as defaults from './templates.js';
 import { DEFAULT_THEME, DEFAULT_TEMPLATES, PAGE_LINK, documentHtml, overlayHtml, resolveLogo, esc } from './templates.js';
+import { listenForRender, renderEntry, renderHtml } from './render.js';
+import { merge, applyOverlay, pageCount, startPages, rewriteLinks, pageIndexById, addOutline } from './pdf.js';
+import { NO_MARGIN, isUrl, firstLine, formatTitle, entryLabel, plural, readProjectPackage } from './util.js';
 
-const { PDFDocument, PDFName, PDFString, PDFHexString, PDFDict, PDFArray } = PDFLib;
+const { PDFDocument } = PDFLib;
 
 export { normaliseIndex, selectEntries, buildTree } from './entries.js';
 export { defaults as templates, esc };
@@ -17,15 +20,16 @@ export { defaults as templates, esc };
 /** Identity helper for typed / documented config files. */
 export const defineConfig = (config) => config;
 
-const here = dirname(fileURLToPath(import.meta.url));
-export const PRINT_CSS_PATH = join(here, 'print.css');
+export const HOOKS = ['filterEntries', 'beforeRender', 'afterRender', 'beforeSave'];
 
-export const DEFAULTS = {
+export const PRINT_CSS_PATH = join(dirname(fileURLToPath(import.meta.url)), 'print.css');
+
+export const DEFAULTS = Object.freeze({
   output: 'storybook.pdf',
   mode: 'auto',
   format: 'A4',
   landscape: false,
-  margin: { top: '18mm', right: '16mm', bottom: '20mm', left: '16mm' },
+  margin: Object.freeze({ top: '18mm', right: '16mm', bottom: '20mm', left: '16mm' }),
   cover: true,
   toc: true,
   pageNumbers: true,
@@ -36,43 +40,24 @@ export const DEFAULTS = {
   exclude: [],
   css: [],
   strict: false,
-};
-
-const noop = () => {};
+});
 
 /**
  * Renders a Storybook into a single PDF.
  *
- * @param {object} opts
- * @param {string} opts.source        Path to a static build (storybook-static) or URL of a running Storybook.
- * @param {string} [opts.output]      Output file. Pass `null` to only get the bytes back.
- * @param {string} [opts.title]       Document title (cover, metadata). Defaults to the package name.
- * @param {string} [opts.subtitle]
- * @param {'auto'|'docs'|'stories'|'all'} [opts.mode]
- * @param {string[]} [opts.include]   Glob patterns on id / title / "title/name".
- * @param {string[]} [opts.exclude]
- * @param {string[]} [opts.css]       Extra stylesheets (paths) injected after print.css.
- * @param {string} [opts.chromium]  Path to a Chrome/Chromium binary (else Playwright's own; env STORYBOOK_PDF_CHROMIUM).
- * @param {string} [opts.storybookUrl] Public URL of the Storybook; links to other stories that are
- *                                    not part of the PDF point there instead of the temporary server.
- * @param {object} [opts.theme]     Corporate design: accentColor, textColor, mutedColor, fontFamily, fontCss, logo, locale.
- * @param {object} [opts.templates] Own HTML templates: cover, toc, header, footer, back (ctx => html) and css.
- * @param {object} [opts.hooks]     Lifecycle hooks: filterEntries, beforeRender, afterRender, beforeSave.
- * @returns {Promise<{ bytes: Uint8Array, pages: number, entries: object[], failed: object[] }>}
+ * @param {import('./index').ExportOptions} opts
+ * @returns {Promise<import('./index').ExportResult>}
  */
-export async function exportPdf(opts) {
-  const given = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined));
-  const o = { ...DEFAULTS, ...given, margin: { ...DEFAULTS.margin, ...given.margin } };
-  const log = o.log ?? noop;
-
-  if (!o.source) throw new Error('No Storybook source given.');
+export async function exportPdf(opts = {}) {
+  const o = normaliseOptions(opts);
+  const log = o.log;
 
   let server;
   let base;
-  if (/^https?:\/\//i.test(o.source)) {
-    base = o.source.replace(/\/?(index\.html|iframe\.html)?(\?.*)?$/, '/');
+  if (isUrl(o.source)) {
+    base = o.source.replace(/\/?(index\.html|iframe\.html)?([?#].*)?$/, '/');
   } else {
-    const dir = resolve(o.source);
+    const dir = resolve(o.cwd, o.source);
     if (!existsSync(join(dir, 'iframe.html'))) {
       throw new Error(`"${dir}" does not look like a Storybook build (no iframe.html). Run "storybook build" first.`);
     }
@@ -80,91 +65,48 @@ export async function exportPdf(opts) {
     base = server.url;
   }
 
-  const { chromium } = await import('playwright');
   let browser;
-
   try {
+    // ---- 0. Decide what goes into the PDF -----------------------------------
     const index = await loadIndex(base);
     let entries = selectEntries(index, o);
-    if (o.hooks?.filterEntries) entries = (await o.hooks.filterEntries(entries, index)) ?? entries;
+    if (o.hooks.filterEntries) entries = (await o.hooks.filterEntries(entries, index)) ?? entries;
     if (!entries.length) throw new Error('No docs pages or stories matched the given filters.');
-    log(`Found ${index.length} index entries, exporting ${entries.length}.`);
+    log(`Found ${plural(index.length, 'index entry', 'index entries')}, exporting ${entries.length}.`);
 
-    const title = o.title ?? (await guessTitle(o.source));
-    const m = o.margin;
-    const css = [
-      await readFile(PRINT_CSS_PATH, 'utf8'),
-      // CSS @page beats Playwright's margin option, so state the configured margins here.
-      `@page { margin: ${m.top} ${m.right} ${m.bottom} ${m.left}; }`,
-      ...(await Promise.all(o.css.map((f) => readFile(resolve(o.cwd ?? '.', f), 'utf8')))),
-    ].join('\n');
+    const pkg = isUrl(o.source) ? {} : await readProjectPackage(resolve(o.cwd, o.source));
+    const css = await buildPrintCss(o);
     const theme = { ...DEFAULT_THEME, ...o.theme };
     theme.logo = await resolveLogo(theme.logo, o.cwd);
     const templates = { ...DEFAULT_TEMPLATES, ...o.templates };
-    const hooks = o.hooks ?? {};
     if (!o.pageNumbers && !o.templates?.footer) templates.footer = () => '';
 
+    const { chromium } = await import('playwright');
     const executablePath = o.chromium ?? process.env.STORYBOOK_PDF_CHROMIUM;
     browser = await chromium.launch(executablePath ? { executablePath } : {});
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 });
     context.setDefaultTimeout(o.timeout);
+    context.setDefaultNavigationTimeout(o.timeout);
 
-    const pdfOptions = {
-      format: o.format,
-      landscape: o.landscape,
-      margin: o.margin,
-      printBackground: true,
-    };
+    const pdfOptions = { format: o.format, landscape: o.landscape, margin: o.margin, printBackground: true };
 
-    // ---- 1. Render every entry --------------------------------------------
-    const rendered = new Array(entries.length);
-    const failed = [];
-    let done = 0;
-    let next = 0;
-    const worker = async () => {
-      const page = await context.newPage();
-      await page.addInitScript(listenForRender);
-      try {
-        while (next < entries.length) {
-          const i = next++;
-          const entry = entries[i];
-          try {
-            let pdf = await renderEntry(page, base, entry, css, pdfOptions, o, hooks);
-            if (hooks.afterRender) pdf = (await hooks.afterRender({ entry, pdf })) ?? pdf;
-            rendered[i] = pdf;
-          } catch (err) {
-            failed.push({ entry, error: err });
-            log(`  ✗ ${label(entry)}: ${err.message.split('\n')[0]}`);
-          }
-          done++;
-          log(`  [${done}/${entries.length}] ${label(entry)}`);
-        }
-      } finally {
-        await page.close();
-      }
-    };
-    await Promise.all(Array.from({ length: Math.max(1, Math.min(o.concurrency, entries.length)) }, worker));
-
+    // ---- 1. Render every entry ----------------------------------------------
+    const { parts, failed } = await renderEntries(context, { base, entries, css, pdfOptions, o });
     if (failed.length && o.strict) {
-      throw new Error(`${failed.length} entr${failed.length === 1 ? 'y' : 'ies'} failed to render:\n` +
-        failed.map((f) => `  - ${label(f.entry)}: ${f.error.message.split('\n')[0]}`).join('\n'));
+      throw new Error(`${plural(failed.length, 'entry', 'entries')} failed to render:\n` +
+        failed.map((f) => `  - ${entryLabel(f.entry)}: ${firstLine(f.error)}`).join('\n'));
     }
-
-    const ok = entries.map((entry, i) => ({ entry, pdf: rendered[i] })).filter((r) => r.pdf);
-    if (!ok.length) throw new Error('Nothing could be rendered.');
-
-    // ---- 2. Load parts, render front & back matter ----------------------------
-    const parts = [];
-    for (const { entry, pdf } of ok) parts.push({ entry, doc: await PDFDocument.load(pdf) });
+    if (!parts.length) throw new Error('Nothing could be rendered.');
 
     const okEntries = parts.map((p) => p.entry);
+    const contentDocs = parts.map((p) => p.doc);
     const tree = buildTree(okEntries);
-    const date = o.date ?? new Date();
+    const date = o.date;
     const ctx = {
-      title,
+      title: o.title ?? pkg.name ?? 'Storybook',
       subtitle: o.subtitle,
       author: o.author,
-      version: o.version ?? (await guessVersion(o.source)),
+      version: o.version ?? pkg.version,
       date,
       dateText: date.toLocaleDateString(theme.locale, { year: 'numeric', month: 'long', day: 'numeric' }),
       logo: theme.logo,
@@ -173,107 +115,118 @@ export async function exportPdf(opts) {
       esc,
     };
 
+    // ---- 2. Front & back matter -------------------------------------------------
     const page = await context.newPage();
-    const html = async (template, extra) => {
-      const body = await template({ ...ctx, ...extra });
-      if (!body) return null;
-      // The cover gets the whole sheet (full-bleed backgrounds); --pdf-margin-* tells it the regular margins.
-      const options = extra.kind === 'cover' ? { ...pdfOptions, margin: { top: 0, right: 0, bottom: 0, left: 0 } } : pdfOptions;
-      const doc = documentHtml(body, { printCss: css, theme, templateCss: templates.css, margin: o.margin, fullBleed: extra.kind === 'cover' });
-      const bytes = await renderHtml(page, doc, options);
-      return PDFDocument.load(bytes);
-    };
+    try {
+      const renderTemplate = async (name, extra) => {
+        let body;
+        try {
+          body = await templates[name]({ ...ctx, ...extra });
+        } catch (err) {
+          throw new Error(`Template "${name}" failed: ${err.message}`, { cause: err });
+        }
+        if (!body) return null;
+        const fullBleed = name === 'cover';
+        const html = documentHtml(body, { printCss: css, theme, templateCss: templates.css, margin: o.margin, fullBleed });
+        return PDFDocument.load(await renderHtml(page, html, fullBleed ? { ...pdfOptions, margin: NO_MARGIN } : pdfOptions));
+      };
 
-    const front = [];
-    const kinds = [];
-    if (o.cover) {
-      const doc = await html(templates.cover, { kind: 'cover' });
-      if (doc) { front.push(doc); kinds.push(...doc.getPageIndices().map(() => 'cover')); }
-    }
-    if (o.toc) {
-      // First pass with dummy numbers only to learn how many pages the TOC needs.
-      const tocCtx = (numbers) => ({ kind: 'toc', tree: tocTree(tree, numbers), items: flatten(tocTree(tree, numbers)) });
-      const dummy = await html(templates.toc, tocCtx(okEntries.map(() => 9999)));
-      if (dummy) {
-        const starts = startPages(parts, front.reduce((n, d) => n + d.getPageCount(), 0) + dummy.getPageCount());
-        const doc = await html(templates.toc, tocCtx(starts));
-        front.push(doc);
-        kinds.push(...doc.getPageIndices().map(() => 'toc'));
+      const cover = o.cover ? await renderTemplate('cover', { kind: 'cover' }) : null;
+      const toc = o.toc ? await renderToc(renderTemplate, { tree, contentDocs, before: cover ? cover.getPageCount() : 0 }) : null;
+      const back = await renderTemplate('back', { kind: 'back' });
+
+      // ---- 3. Merge -------------------------------------------------------------
+      const sections = [
+        ...(cover ? [{ kind: 'cover', doc: cover }] : []),
+        ...(toc ? [{ kind: 'toc', doc: toc }] : []),
+        ...parts.map((p) => ({ kind: 'content', doc: p.doc, entry: p.entry })),
+        ...(back ? [{ kind: 'back', doc: back }] : []),
+      ];
+      const out = await merge(sections.map((s) => s.doc));
+      const starts = startPages(contentDocs, pageCount([cover, toc].filter(Boolean)));
+
+      // ---- 4. Running header / footer --------------------------------------------
+      const pageInfo = sections.flatMap((s) => s.doc.getPageIndices().map(() => s));
+      await addRunningHeaders(out, { page, pageInfo, templates, ctx, theme, margin: o.margin });
+
+      // ---- 5. Links, bookmarks, metadata -----------------------------------------
+      const links = rewriteLinks(out, { base, idToPage: pageIndexById(okEntries, starts), storybookUrl: o.storybookUrl });
+      if (links.removed) log(`  ${plural(links.removed, 'link', 'links')} to stories outside the PDF made non-clickable (pass --storybook-url to keep them).`);
+      addOutline(out, tree, starts);
+      setMetadata(out, ctx);
+
+      if (o.hooks.beforeSave) await o.hooks.beforeSave({ doc: out, PDFLib, entries: okEntries, startPages: starts, context: ctx });
+
+      const bytes = await out.save();
+      if (o.output) {
+        const file = resolve(o.cwd, o.output);
+        await mkdir(dirname(file), { recursive: true });
+        await writeFile(file, bytes);
       }
+      return { bytes, pages: out.getPageCount(), entries: okEntries, failed };
+    } finally {
+      await page.close().catch(() => {});
     }
-    const back = templates.back ? await html(templates.back, { kind: 'back' }) : null;
-
-    // ---- 3. Merge ---------------------------------------------------------------
-    const out = await PDFDocument.create();
-    const frontPageCount = front.reduce((n, d) => n + d.getPageCount(), 0);
-    const starts = startPages(parts, frontPageCount);
-    const sections = [];
-    parts.forEach((p, i) => p.doc.getPageIndices().forEach(() => { kinds.push('content'); sections.push(okEntries[i]); }));
-    if (back) kinds.push(...back.getPageIndices().map(() => 'back'));
-
-    for (const doc of [...front, ...parts.map((p) => p.doc), ...(back ? [back] : [])]) {
-      const pages = await out.copyPages(doc, doc.getPageIndices());
-      pages.forEach((p) => out.addPage(p));
-    }
-
-    // ---- 4. Running header / footer ----------------------------------------
-    const total = out.getPageCount();
-    const running = await Promise.all(out.getPages().map(async (_, i) => {
-      const entry = kinds[i] === 'content' ? sections[i - frontPageCount] : null;
-      const pctx = { ...ctx, kind: kinds[i], pageNumber: i + 1, total, entry, section: entry ? entry.title.split('/').map((s) => s.trim()).join(' › ') : null };
-      return `${(await templates.header(pctx)) ?? ''}${(await templates.footer(pctx)) ?? ''}`;
-    }));
-    if (running.some(Boolean)) {
-      const { width, height } = out.getPage(0).getSize();
-      await page.setContent(overlayHtml(running, { widthPt: width, heightPt: height, margin: o.margin, theme, templateCss: templates.css }), { waitUntil: 'load' });
-      await settle(page, 0);
-      const overlay = await page.pdf({ preferCSSPageSize: true, printBackground: true, margin: { top: 0, right: 0, bottom: 0, left: 0 } });
-      const used = running.map((r, i) => (r ? i : -1)).filter((i) => i >= 0);
-      const embedded = await out.embedPdf(overlay, used);
-      used.forEach((pageIndex, k) => {
-        const target = out.getPage(pageIndex);
-        const { width: w, height: h } = target.getSize();
-        target.drawPage(embedded[k], { x: 0, y: 0, width: w, height: h });
-      });
-    }
-    await page.close();
-
-    // ---- 5. Links, bookmarks, metadata ---------------------------------------
-    const idToPage = new Map();
-    okEntries.forEach((e, i) => {
-      idToPage.set(e.id, starts[i]);
-      // `?path=/docs/button--docs` and `?path=/story/button--primary` both lead to the component.
-      const component = e.id.split('--')[0];
-      if (!idToPage.has(component)) idToPage.set(component, starts[i]);
-    });
-
-    rewriteLinks(out, { base, idToPage, storybookUrl: o.storybookUrl });
-    addOutline(out, tree, starts);
-
-    out.setTitle(title, { showInWindowTitleBar: true });
-    if (o.subtitle) out.setSubject(o.subtitle);
-    if (o.author) out.setAuthor(o.author);
-    out.setCreator('storybook-pdf-export');
-    out.setProducer('storybook-pdf-export (Playwright + pdf-lib)');
-    out.setCreationDate(date);
-    out.setModificationDate(date);
-
-    if (hooks.beforeSave) await hooks.beforeSave({ doc: out, PDFLib, entries: okEntries, startPages: starts, context: ctx });
-
-    const bytes = await out.save();
-    if (o.output) {
-      await mkdir(dirname(resolve(o.output)), { recursive: true });
-      await writeFile(o.output, bytes);
-    }
-
-    return { bytes, pages: out.getPageCount(), entries: okEntries, failed };
   } finally {
-    await browser?.close();
+    await browser?.close().catch(() => {});
     await server?.close();
   }
 }
 
 // ---------------------------------------------------------------------------
+
+const KNOWN_OPTIONS = new Set([
+  ...Object.keys(DEFAULTS),
+  'source', 'title', 'subtitle', 'author', 'version', 'date', 'theme', 'templates', 'hooks',
+  'storybookUrl', 'chromium', 'cwd', 'log', 'warn',
+]);
+
+function normaliseOptions(opts) {
+  // `undefined` means "not set" so it never overrides a default.
+  const given = Object.fromEntries(Object.entries(opts).filter(([, v]) => v !== undefined));
+  const warn = given.warn ?? ((msg) => console.warn(msg));
+  for (const key of Object.keys(given)) {
+    if (!KNOWN_OPTIONS.has(key)) warn(`⚠ Unknown option "${key}" is ignored.`);
+  }
+  for (const key of Object.keys(given.theme ?? {})) {
+    if (!(key in DEFAULT_THEME)) warn(`⚠ Unknown theme option "${key}" is ignored.`);
+  }
+  for (const key of Object.keys(given.hooks ?? {})) {
+    if (!HOOKS.includes(key)) warn(`⚠ Unknown hook "${key}" is ignored.`);
+  }
+  const o = {
+    ...DEFAULTS,
+    ...given,
+    margin: { ...DEFAULTS.margin, ...given.margin },
+    hooks: given.hooks ?? {},
+    cwd: given.cwd ?? process.cwd(),
+    log: given.log ?? (() => {}),
+    date: given.date == null ? new Date() : new Date(given.date),
+  };
+
+  if (!o.source) throw new Error('No Storybook source given.');
+  assertMode(o.mode);
+  if (Number.isNaN(o.date.getTime())) throw new Error(`Invalid date: ${given.date}`);
+  for (const key of ['include', 'exclude', 'css']) {
+    if (!Array.isArray(o[key])) o[key] = [o[key]];
+  }
+  for (const key of ['concurrency', 'timeout', 'delay']) {
+    if (!Number.isFinite(o[key]) || o[key] < 0) throw new Error(`"${key}" must be a non-negative number.`);
+  }
+  o.concurrency = Math.max(1, Math.floor(o.concurrency));
+  for (const [name, fn] of Object.entries(o.hooks)) {
+    if (typeof fn !== 'function') throw new Error(`Hook "${name}" must be a function.`);
+  }
+  for (const [name, value] of Object.entries(o.templates ?? {})) {
+    if (!(name in DEFAULT_TEMPLATES)) {
+      warn(`⚠ Unknown template "${name}" is ignored.`);
+      continue;
+    }
+    const ok = name === 'css' ? typeof value === 'string' : typeof value === 'function';
+    if (!ok) throw new Error(`Template "${name}" must be ${name === 'css' ? 'a string' : 'a function'}.`);
+  }
+  return o;
+}
 
 async function loadIndex(base) {
   for (const file of ['index.json', 'stories.json']) {
@@ -283,27 +236,77 @@ async function loadIndex(base) {
   throw new Error(`Could not load index.json from ${base}`);
 }
 
-async function guessTitle(source) {
-  if (/^https?:/i.test(source)) return 'Storybook';
-  // storybook-static usually lives next to the project's package.json.
-  for (const dir of [resolve(source, '..'), resolve(source), process.cwd()]) {
-    try {
-      const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'));
-      if (pkg.name) return pkg.name;
-    } catch {}
-  }
-  return 'Storybook';
+async function buildPrintCss(o) {
+  const m = o.margin;
+  return [
+    await readFile(PRINT_CSS_PATH, 'utf8'),
+    // CSS @page beats Playwright's margin option, so state the configured margins here.
+    `@page { margin: ${m.top} ${m.right} ${m.bottom} ${m.left}; }`,
+    ...(await Promise.all(o.css.map((f) => readFile(resolve(o.cwd, f), 'utf8')))),
+  ].join('\n');
 }
 
-async function guessVersion(source) {
-  if (/^https?:/i.test(source)) return undefined;
-  for (const dir of [resolve(source, '..'), process.cwd()]) {
+/**
+ * Renders all entries with `concurrency` pages in parallel. A failing entry is
+ * recorded and skipped; its page is replaced in case the renderer crashed.
+ */
+async function renderEntries(context, { base, entries, css, pdfOptions, o }) {
+  const rendered = new Array(entries.length);
+  const failed = [];
+  let next = 0;
+  let done = 0;
+
+  const newPage = async () => {
+    const page = await context.newPage();
+    await page.addInitScript(listenForRender);
+    return page;
+  };
+
+  const worker = async () => {
+    let page = await newPage();
     try {
-      const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'));
-      if (pkg.version) return pkg.version;
-    } catch {}
+      while (next < entries.length) {
+        const i = next++;
+        const entry = entries[i];
+        try {
+          let pdf = await renderEntry(page, { base, entry, css, pdfOptions, delay: o.delay, beforeRender: o.hooks.beforeRender });
+          if (o.hooks.afterRender) pdf = (await o.hooks.afterRender({ entry, pdf })) ?? pdf;
+          rendered[i] = await PDFDocument.load(pdf);
+        } catch (error) {
+          failed.push({ entry, error });
+          o.log(`  ✗ ${entryLabel(entry)}: ${firstLine(error)}`);
+          await page.close().catch(() => {});
+          page = await newPage();
+        }
+        o.log(`  [${++done}/${entries.length}] ${entryLabel(entry)}`);
+      }
+    } finally {
+      await page.close().catch(() => {});
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(o.concurrency, entries.length) }, worker));
+  const parts = entries.map((entry, i) => ({ entry, doc: rendered[i] })).filter((p) => p.doc);
+  return { parts, failed };
+}
+
+/**
+ * The TOC lists page numbers that depend on its own length. Render it until
+ * its page count is stable (normally twice: once to measure, once for real).
+ */
+async function renderToc(renderTemplate, { tree, contentDocs, before }) {
+  const tocContext = (starts) => {
+    const nodes = tocTree(tree, starts);
+    return { kind: 'toc', tree: nodes, items: flatten(nodes) };
+  };
+  let tocPages = 1;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const doc = await renderTemplate('toc', tocContext(startPages(contentDocs, before + tocPages)));
+    if (!doc) return null;
+    if (doc.getPageCount() === tocPages) return doc;
+    tocPages = doc.getPageCount();
   }
-  return undefined;
+  throw new Error('The table of contents does not settle on a page count.');
 }
 
 /** Decorates the sidebar tree with page numbers and link targets for TOC templates. */
@@ -322,194 +325,38 @@ function flatten(nodes) {
   return nodes.flatMap((n) => [n, ...flatten(n.children)]);
 }
 
-function label(entry) {
-  return `${entry.title.replaceAll('/', ' › ')} › ${entry.name}`;
-}
-
-function startPages(parts, offset) {
-  const starts = [];
-  let page = offset;
-  for (const p of parts) {
-    starts.push(page);
-    page += p.doc.getPageCount();
-  }
-  return starts;
-}
-
-/**
- * Runs in the page before Storybook boots: listens for the render events on
- * Storybook's channel. If no event arrives within a few seconds (very old or
- * customised setups) the DOM-based check takes over.
- */
-function listenForRender() {
-  const hook = (channel) => {
-    for (const ev of ['docsRendered', 'storyRendered', 'storyErrored', 'storyThrewException']) {
-      channel.on(ev, () => { window.__sbPdfRendered = true; });
-    }
-  };
-  let current;
-  Object.defineProperty(window, '__STORYBOOK_ADDONS_CHANNEL__', {
-    configurable: true,
-    get: () => current,
-    set: (v) => { current = v; try { hook(v); } catch {} },
-  });
-  setTimeout(() => { window.__sbPdfWaitedForEvent = true; }, 5000);
-}
-
-async function renderEntry(page, base, entry, css, pdfOptions, o, hooks) {
-  const viewMode = entry.type === 'docs' ? 'docs' : 'story';
-  const url = new URL(`iframe.html?id=${encodeURIComponent(entry.id)}&viewMode=${viewMode}`, base);
-
-  await page.goto(url.href, { waitUntil: 'load' });
-  await page.addStyleTag({ content: css });
-
-  // Wait for Storybook's own "rendered" event (falls back to the DOM for
-  // older versions), or bail out on its error / no-preview screens.
-  const state = await page.waitForFunction(
-    (mode) => {
-      const b = document.body.classList;
-      if (b.contains('sb-show-errordisplay')) return 'error';
-      if (b.contains('sb-show-nopreview')) return 'nopreview';
-      if (window.__sbPdfRendered) return 'ok';
-      if (b.contains('sb-show-preparing-story') || b.contains('sb-show-preparing-docs')) return false;
-      if (window.__STORYBOOK_ADDONS_CHANNEL__ && !window.__sbPdfWaitedForEvent) return false;
-      const root = document.querySelector(mode === 'docs' ? '#storybook-docs' : '#storybook-root, #root');
-      return root && root.childElementCount > 0 ? 'ok' : false;
-    },
-    viewMode,
-    { polling: 100 },
-  ).then((h) => h.jsonValue());
-
-  if (state === 'error') {
-    const msg = await page.locator('#error-message, .sb-errordisplay_main').first().innerText().catch(() => 'Unknown error');
-    throw new Error(`Storybook error: ${msg.trim()}`);
-  }
-  if (state === 'nopreview') throw new Error('No preview available');
-
-  if (viewMode === 'story') {
-    await page.evaluate((text) => {
-      const h = document.createElement('div');
-      h.className = 'sb-pdf-story-header';
-      h.textContent = text;
-      h.style.cssText = 'font:600 12pt/1.3 system-ui,sans-serif;margin:0 0 12pt;padding-bottom:6pt;border-bottom:1px solid #ccc;color:#222';
-      document.body.prepend(h);
-    }, label(entry));
-  }
-
-  await settle(page, o.delay);
-  if (hooks.beforeRender) await hooks.beforeRender({ page, entry });
-  return page.pdf(pdfOptions);
-}
-
-async function renderHtml(page, html, pdfOptions) {
-  await page.setContent(html, { waitUntil: 'load' });
-  await settle(page, 0);
-  return page.pdf(pdfOptions);
-}
-
-/** Waits for network, fonts, images and animations to calm down. */
-async function settle(page, delay) {
-  await page.waitForLoadState('networkidle').catch(() => {});
-  await page.evaluate(async () => {
-    await document.fonts?.ready;
-    await Promise.all(
-      [...document.images].filter((img) => !img.complete).map((img) => new Promise((r) => { img.onload = img.onerror = r; })),
-    );
-    // Finish CSS animations / transitions so we don't print a half-faded state.
-    for (const a of document.getAnimations?.() ?? []) {
-      try { a.finish(); } catch {}
-    }
-    // Lazy parts (inline stories in docs, code snippets) keep mutating the DOM
-    // for a moment after the render event — wait for 400 ms of silence.
-    await new Promise((resolve) => {
-      let timer;
-      const done = () => { observer.disconnect(); clearTimeout(max); resolve(); };
-      const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, 400); });
-      observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
-      timer = setTimeout(done, 400);
-      const max = setTimeout(done, 5000);
-    });
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  });
-  if (delay) await page.waitForTimeout(delay);
-}
-
-// ---- PDF post-processing --------------------------------------------------------
-
-function goTo(doc, pageIndex) {
-  const page = doc.getPage(Math.min(pageIndex, doc.getPageCount() - 1));
-  return doc.context.obj([page.ref, PDFName.of('XYZ'), null, null, null]);
-}
-
-/**
- * Turns TOC marker links and links to other stories into internal jumps,
- * and repoints remaining links to the temporary server at the public Storybook.
- */
-function rewriteLinks(doc, { base, idToPage, storybookUrl }) {
-  for (const page of doc.getPages()) {
-    const annots = page.node.lookupMaybe(PDFName.of('Annots'), PDFArray);
-    if (!annots) continue;
-    for (let i = 0; i < annots.size(); i++) {
-      const annot = annots.lookupMaybe(i, PDFDict);
-      const action = annot?.lookupMaybe(PDFName.of('A'), PDFDict);
-      const uriObj = action?.lookup(PDFName.of('URI'));
-      if (!(uriObj instanceof PDFString || uriObj instanceof PDFHexString)) continue;
-      const uri = uriObj.decodeText();
-
-      let target = null;
-      if (uri.startsWith(PAGE_LINK)) {
-        target = Number(uri.slice(PAGE_LINK.length));
-      } else if (uri.startsWith(base)) {
-        const url = new URL(uri);
-        const path = url.searchParams.get('path'); // /docs/<id> or /story/<id>
-        const id = url.searchParams.get('id') ?? path?.split('/')[2];
-        if (id) target = idToPage.get(id) ?? idToPage.get(id.split('--')[0]) ?? null;
-        if (target == null && storybookUrl) {
-          action.set(PDFName.of('URI'), PDFString.of(new URL(uri.slice(base.length), storybookUrl.replace(/\/?$/, '/')).href));
+/** Renders header + footer templates for every page and lays them over the PDF. */
+async function addRunningHeaders(out, { page, pageInfo, templates, ctx, theme, margin }) {
+  const total = out.getPageCount();
+  const html = await Promise.all(
+    pageInfo.map(async ({ kind, entry }, i) => {
+      const pageCtx = { ...ctx, kind, pageNumber: i + 1, total, entry: entry ?? null, section: entry ? formatTitle(entry.title) : null };
+      const parts = [];
+      for (const name of ['header', 'footer']) {
+        try {
+          parts.push((await templates[name](pageCtx)) ?? '');
+        } catch (err) {
+          throw new Error(`Template "${name}" failed on page ${i + 1}: ${err.message}`, { cause: err });
         }
       }
+      return parts.join('');
+    }),
+  );
 
-      if (target != null && Number.isFinite(target)) {
-        annot.delete(PDFName.of('A'));
-        annot.set(PDFName.of('Dest'), goTo(doc, target));
-      }
-    }
-  }
+  const targets = html.flatMap((h, i) => (h ? [i] : []));
+  if (!targets.length) return;
+  const { width, height } = out.getPage(0).getSize();
+  const overlay = overlayHtml(html, { widthPt: width, heightPt: height, margin, theme, templateCss: templates.css });
+  const bytes = await renderHtml(page, overlay, { preferCSSPageSize: true, printBackground: true, margin: NO_MARGIN });
+  await applyOverlay(out, bytes, targets);
 }
 
-/** Adds a nested bookmark tree (the sidebar of your Storybook) to the PDF. */
-function addOutline(doc, tree, starts) {
-  if (!tree.length) return;
-  const ctx = doc.context;
-
-  const build = (nodes, parentRef) => {
-    const refs = nodes.map(() => ctx.nextRef());
-    let total = 0;
-    nodes.forEach((node, i) => {
-      const dict = ctx.obj({
-        Title: PDFHexString.fromText(node.label),
-        Parent: parentRef,
-        Dest: goTo(doc, starts[node.entry]),
-      });
-      if (i > 0) dict.set(PDFName.of('Prev'), refs[i - 1]);
-      if (i < nodes.length - 1) dict.set(PDFName.of('Next'), refs[i + 1]);
-      if (node.children.length) {
-        const sub = build(node.children, refs[i]);
-        dict.set(PDFName.of('First'), sub.first);
-        dict.set(PDFName.of('Last'), sub.last);
-        // Negative count = collapsed; keep only the top level expanded.
-        dict.set(PDFName.of('Count'), ctx.obj(parentRef === outlineRef ? sub.count : -sub.count));
-      }
-      ctx.assign(refs[i], dict);
-      total += 1;
-      if (parentRef === outlineRef) total += node.children.length; // expanded top level
-    });
-    return { first: refs[0], last: refs.at(-1), count: total };
-  };
-
-  const outlineRef = ctx.nextRef();
-  const top = build(tree, outlineRef);
-  ctx.assign(outlineRef, ctx.obj({ Type: 'Outlines', First: top.first, Last: top.last, Count: top.count }));
-  doc.catalog.set(PDFName.of('Outlines'), outlineRef);
-  doc.catalog.set(PDFName.of('PageMode'), PDFName.of('UseOutlines'));
+function setMetadata(out, ctx) {
+  out.setTitle(ctx.title, { showInWindowTitleBar: true });
+  if (ctx.subtitle) out.setSubject(ctx.subtitle);
+  if (ctx.author) out.setAuthor(ctx.author);
+  out.setCreator('storybook-pdf-export');
+  out.setProducer('storybook-pdf-export (Playwright + pdf-lib)');
+  out.setCreationDate(ctx.date);
+  out.setModificationDate(ctx.date);
 }

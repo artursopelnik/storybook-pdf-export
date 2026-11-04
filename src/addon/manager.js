@@ -43,7 +43,9 @@ function usePdfAvailable(url) {
     if (!url) return;
     let alive = true;
     fetch(url, { method: 'HEAD' })
-      .then((r) => alive && setOk(r.ok && (r.headers.get('content-type') ?? '').includes('pdf')))
+      // Some hosts answer unknown paths with their index.html (SPA fallback), so a
+      // 200 alone is not enough. Some serve PDFs as application/octet-stream.
+      .then((r) => alive && setOk(r.ok && !(r.headers.get('content-type') ?? '').includes('text/html')))
       .catch(() => {});
     return () => {
       alive = false;

@@ -10,7 +10,7 @@ export function normaliseIndex(json) {
   if (!raw || typeof raw !== 'object') {
     throw new Error('Unrecognised Storybook index: expected an "entries" (index.json) or "stories" (stories.json) object.');
   }
-  return Object.values(raw).map((e) => ({
+  return Object.values(raw).filter((e) => e?.id && (e.title ?? e.kind)).map((e) => ({
     id: e.id,
     title: e.title ?? e.kind,
     name: e.name ?? e.story,
@@ -41,12 +41,22 @@ export function globToRegExp(glob) {
   return new RegExp(`^${re}$`, 'i');
 }
 
-function matchesAny(entry, patterns) {
-  const candidates = [entry.id, entry.title, `${entry.title}/${entry.name}`];
-  return patterns.some((p) => {
-    const re = globToRegExp(p);
-    return candidates.some((c) => re.test(c));
-  });
+/**
+ * Compiles filter patterns once. A pattern also matches everything below it:
+ * "Components" ⇒ "Components" and "Components/**".
+ */
+function compile(patterns) {
+  const res = patterns.flatMap((p) => [p, `${p}/**`]).map(globToRegExp);
+  return (entry) => {
+    const candidates = [entry.id, entry.title, `${entry.title}/${entry.name}`];
+    return res.some((re) => candidates.some((c) => re.test(c)));
+  };
+}
+
+export const MODES = ['auto', 'docs', 'stories', 'all'];
+
+export function assertMode(mode) {
+  if (!MODES.includes(mode)) throw new Error(`Unknown mode "${mode}". Use one of: ${MODES.join(', ')}.`);
 }
 
 /**
@@ -59,11 +69,17 @@ function matchesAny(entry, patterns) {
  *   all     – docs pages and stories
  */
 export function selectEntries(entries, { mode = 'auto', include = [], exclude = [] } = {}) {
-  let list = entries.filter((e) => !e.tags.some((t) => EXCLUDE_TAGS.includes(t)));
+  assertMode(mode);
 
-  // A pattern also matches everything below it: "Components" ⇒ "Components/**".
-  if (include.length) list = list.filter((e) => matchesAny(e, include.flatMap((p) => [p, `${p}/**`])));
-  if (exclude.length) list = list.filter((e) => !matchesAny(e, exclude.flatMap((p) => [p, `${p}/**`])));
+  let list = entries.filter((e) => !e.tags.some((t) => EXCLUDE_TAGS.includes(t)));
+  if (include.length) {
+    const included = compile(include);
+    list = list.filter(included);
+  }
+  if (exclude.length) {
+    const excluded = compile(exclude);
+    list = list.filter((e) => !excluded(e));
+  }
 
   switch (mode) {
     case 'docs':
@@ -72,12 +88,11 @@ export function selectEntries(entries, { mode = 'auto', include = [], exclude = 
       return list.filter((e) => e.type === 'story');
     case 'all':
       return list;
-    case 'auto': {
+    default: {
+      // auto
       const titlesWithDocs = new Set(list.filter((e) => e.type === 'docs').map((e) => e.title));
       return list.filter((e) => e.type === 'docs' || !titlesWithDocs.has(e.title));
     }
-    default:
-      throw new Error(`Unknown mode "${mode}". Use one of: auto, docs, stories, all.`);
   }
 }
 
