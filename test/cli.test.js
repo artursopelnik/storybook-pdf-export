@@ -32,3 +32,8 @@ test('missing build or config exits with code 1 and a helpful message', () => {
   assert.equal(config.status, 1);
   assert.match(config.stderr, /Config file not found/);
 });
+
+test('--help documents browser and build options', () => {
+  const { stdout } = cli('--help');
+  for (const flag of ['--browser ', '--browser-path', '--build', '--no-build', '--config-dir']) assert.ok(stdout.includes(flag), flag);
+});

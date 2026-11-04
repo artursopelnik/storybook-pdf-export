@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import * as PDFLib from 'pdf-lib';
 
 import { serveStatic } from './server.js';
+import { launchBrowser } from './browser.js';
+import { buildStorybook, findConfigDir } from './build.js';
 import { normaliseIndex, selectEntries, buildTree, assertMode } from './entries.js';
 import * as defaults from './templates.js';
 import { DEFAULT_THEME, DEFAULT_TEMPLATES, PAGE_LINK, documentHtml, overlayHtml, resolveLogo, esc } from './templates.js';
@@ -40,6 +42,8 @@ export const DEFAULTS = Object.freeze({
   exclude: [],
   css: [],
   strict: false,
+  browser: 'auto',
+  configDir: '.storybook',
 });
 
 /**
@@ -52,18 +56,8 @@ export async function exportPdf(opts = {}) {
   const o = normaliseOptions(opts);
   const log = o.log;
 
-  let server;
-  let base;
-  if (isUrl(o.source)) {
-    base = o.source.replace(/\/?(index\.html|iframe\.html)?([?#].*)?$/, '/');
-  } else {
-    const dir = resolve(o.cwd, o.source);
-    if (!existsSync(join(dir, 'iframe.html'))) {
-      throw new Error(`"${dir}" does not look like a Storybook build (no iframe.html). Run "storybook build" first.`);
-    }
-    server = await serveStatic(dir);
-    base = server.url;
-  }
+  const source = await openSource(o);
+  const { base } = source;
 
   let browser;
   try {
@@ -74,16 +68,14 @@ export async function exportPdf(opts = {}) {
     if (!entries.length) throw new Error('No docs pages or stories matched the given filters.');
     log(`Found ${plural(index.length, 'index entry', 'index entries')}, exporting ${entries.length}.`);
 
-    const pkg = isUrl(o.source) ? {} : await readProjectPackage(resolve(o.cwd, o.source));
+    const pkg = source.projectDir ? await readProjectPackage(source.projectDir) : {};
     const css = await buildPrintCss(o);
     const theme = { ...DEFAULT_THEME, ...o.theme };
     theme.logo = await resolveLogo(theme.logo, o.cwd);
     const templates = { ...DEFAULT_TEMPLATES, ...o.templates };
     if (!o.pageNumbers && !o.templates?.footer) templates.footer = () => '';
 
-    const { chromium } = await import('playwright');
-    const executablePath = o.chromium ?? process.env.STORYBOOK_PDF_CHROMIUM;
-    browser = await chromium.launch(executablePath ? { executablePath } : {});
+    ({ browser } = await launchBrowser({ browser: o.browser, browserPath: o.browserPath, log }));
     // Lay pages out at the width they will have on paper, so responsive
     // components and the scroll-container fitting see the real space.
     const printWidth = printableWidth(o);
@@ -178,7 +170,7 @@ export async function exportPdf(opts = {}) {
     }
   } finally {
     await browser?.close().catch(() => {});
-    await server?.close();
+    await source.close();
   }
 }
 
@@ -187,7 +179,7 @@ export async function exportPdf(opts = {}) {
 const KNOWN_OPTIONS = new Set([
   ...Object.keys(DEFAULTS),
   'source', 'title', 'subtitle', 'author', 'version', 'date', 'theme', 'templates', 'hooks',
-  'storybookUrl', 'chromium', 'cwd', 'log', 'warn',
+  'storybookUrl', 'browserPath', 'chromium', 'build', 'cwd', 'log', 'warn',
 ]);
 
 function normaliseOptions(opts) {
@@ -214,6 +206,11 @@ function normaliseOptions(opts) {
     date: given.date == null ? new Date() : new Date(given.date),
   };
 
+  // `chromium` and STORYBOOK_PDF_CHROMIUM are the old names of browserPath.
+  o.browserPath = given.browserPath ?? given.chromium ?? process.env.STORYBOOK_PDF_BROWSER_PATH ?? process.env.STORYBOOK_PDF_CHROMIUM;
+  if (given.browser === undefined && process.env.STORYBOOK_PDF_BROWSER) o.browser = process.env.STORYBOOK_PDF_BROWSER;
+  if (o.build !== undefined && typeof o.build !== 'boolean') throw new Error('"build" must be true, false or left out (auto).');
+
   if (!o.source) throw new Error('No Storybook source given.');
   assertMode(o.mode);
   if (Number.isNaN(o.date.getTime())) throw new Error(`Invalid date: ${given.date}`);
@@ -237,6 +234,46 @@ function normaliseOptions(opts) {
     if (!ok) throw new Error(`Template "${name}" must be ${name === 'css' ? 'a string' : 'a function'}.`);
   }
   return o;
+}
+
+/**
+ * Where the Storybook comes from:
+ *   - a URL of a running Storybook
+ *   - a static build (storybook-static), served on a random local port
+ *   - nothing built yet: `storybook build` into a temporary folder first
+ *     (`build: true` always rebuilds, `build: false` never builds)
+ */
+async function openSource(o) {
+  if (isUrl(o.source)) {
+    return { base: o.source.replace(/\/?(index\.html|iframe\.html)?([?#].*)?$/, '/'), projectDir: null, close: async () => {} };
+  }
+
+  const dir = resolve(o.cwd, o.source);
+  const isBuild = existsSync(join(dir, 'iframe.html'));
+  if (isBuild && o.build !== true) {
+    const server = await serveStatic(dir);
+    return { base: server.url, projectDir: dir, close: server.close };
+  }
+
+  const configDir = findConfigDir(o.cwd, o.configDir);
+  if (o.build === false || !configDir) {
+    throw new Error(
+      `"${dir}" does not look like a Storybook build (no iframe.html)` +
+        (o.build === false ? '.' : `, and there is no ${o.configDir} folder in ${o.cwd} to build one from.`) +
+        ' Run "storybook build" first, pass the build folder, or the URL of a running Storybook.',
+    );
+  }
+  const build = await buildStorybook({ cwd: o.cwd, configDir: o.configDir, log: o.log });
+  const server = await serveStatic(build.dir);
+  return {
+    base: server.url,
+    // The project's package.json sits next to where storybook-static would be.
+    projectDir: join(o.cwd, 'storybook-static'),
+    close: async () => {
+      await server.close();
+      await build.cleanup();
+    },
+  };
 }
 
 async function loadIndex(base) {

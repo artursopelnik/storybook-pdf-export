@@ -44,13 +44,13 @@
   },
   "scripts": {
     "test": "node test/run.mjs",
-    "test:smoke": "npm --prefix test/fixtures/storybook install --no-audit --no-fund && npm --prefix test/fixtures/storybook run build && node test/smoke.mjs",
+    "test:smoke": "npm --prefix test/fixtures/storybook install --no-audit --no-fund && node test/smoke.mjs",
     "prepublishOnly": "npm test && npm run test:types",
     "test:types": "tsc -p test/types"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",
-    "playwright": "^1.50.0"
+    "playwright-core": "^1.50.0"
   },
   "peerDependencies": {
     "storybook": "^8.0.0 || ^9.0.0 || ^10.0.0"

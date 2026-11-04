@@ -2,8 +2,9 @@
  * End-to-end: runs the whole pipeline (server → Chromium → templates →
  * merge → links → bookmarks → hooks) against a tiny fake Storybook build.
  *
- * Needs Chromium: `npx playwright install chromium`, or point
- * STORYBOOK_PDF_CHROMIUM at a Chrome/Chromium binary. Without a browser the
+ * Needs a Chromium-based browser: Playwright's Chromium, Google Chrome or
+ * Microsoft Edge (found automatically), or point
+ * STORYBOOK_PDF_BROWSER_PATH at a binary. Without a browser the
  * suite is skipped locally and fails on CI.
  */
 import { test, before } from 'node:test';
@@ -14,16 +15,16 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString } from 'pdf-lib';
 import { exportPdf } from '../src/index.js';
+import { launchBrowser } from '../src/browser.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fake-storybook', import.meta.url));
-const chromium = process.env.STORYBOOK_PDF_CHROMIUM;
+const browserPath = process.env.STORYBOOK_PDF_BROWSER_PATH ?? process.env.STORYBOOK_PDF_CHROMIUM;
+const openBrowser = async () => (await launchBrowser({ browserPath })).browser;
 
 let browserMissing = null;
 before(async () => {
   try {
-    const { chromium: pw } = await import('playwright');
-    const browser = await pw.launch(chromium ? { executablePath: chromium } : {});
-    await browser.close();
+    await (await openBrowser()).close();
   } catch (err) {
     browserMissing = err.message.split('\n')[0];
     if (process.env.CI) throw err;
@@ -32,7 +33,7 @@ before(async () => {
 
 const run = (t, options = {}) => {
   if (browserMissing) return t.skip(`no browser: ${browserMissing}`);
-  return exportPdf({ source: FIXTURE, output: null, chromium, concurrency: 2, timeout: 15_000, warn: () => {}, ...options });
+  return exportPdf({ source: FIXTURE, output: null, browserPath, concurrency: 2, timeout: 15_000, warn: () => {}, ...options });
 };
 
 /** Outline as indented strings: "Components", "  Button", … */
@@ -187,11 +188,10 @@ test('option validation', async () => {
 
 test('settle() does not wait for lazy images below the fold', async (t) => {
   if (browserMissing) return t.skip();
-  const { chromium: pw } = await import('playwright');
   const { settle } = await import('../src/render.js');
   const { serveStatic } = await import('../src/server.js');
   const server = await serveStatic(FIXTURE);
-  const browser = await pw.launch(chromium ? { executablePath: chromium } : {});
+  const browser = await openBrowser();
   try {
     const page = await browser.newPage();
     await page.goto(new URL('index.html', server.url).href);
@@ -249,11 +249,10 @@ test('a cover template that overflows is cut to one page', async (t) => {
 
 test('fitForPrint is fully reversible and the addon script yields to the exporter', async (t) => {
   if (browserMissing) return t.skip();
-  const { chromium: pw } = await import('playwright');
   const { fitForPrint, fitOnPrintScript } = await import('../src/fit.js');
   const { serveStatic } = await import('../src/server.js');
   const server = await serveStatic(FIXTURE);
-  const browser = await pw.launch(chromium ? { executablePath: chromium } : {});
+  const browser = await openBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 672, height: 900 } });
     await page.goto(new URL('iframe.html?id=foundations-tables--docs&viewMode=docs', server.url).href);

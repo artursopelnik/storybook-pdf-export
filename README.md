@@ -57,23 +57,61 @@ That's it. Every docs page (MDX and autodocs) ends up in the file, in sidebar or
 
 ## Quick start
 
+No install, no addon, no config. In your project folder:
+
+```bash
+npx storybook-pdf-export
+```
+
+That's it. If there is no `storybook-static` yet, the tool runs `storybook build` for you in a temporary folder, exports the PDF, and cleans up. Nothing is added to your project, no `package.json` change, no Storybook addon to register. The browser it needs is the Google Chrome or Microsoft Edge you already have (see [Browser](#browser)).
+
+```bash
+npx storybook-pdf-export ./storybook-static -o design-system.pdf   # an existing build
+npx storybook-pdf-export http://localhost:6006 -o docs.pdf          # a running Storybook
+npx storybook-pdf-export https://design.acme.com/storybook/         # a deployed one
+```
+
+### Want it in your project?
+
+Only if you want to pin the version or run it in CI:
+
 ```bash
 npm i -D storybook-pdf-export
-npx playwright install chromium   # once, unless you pass --chromium
-
-npx storybook build
-npx storybook-pdf-export          # → storybook.pdf
 ```
 
-It also works against a running Storybook:
+```json
+{
+  "scripts": {
+    "storybook:pdf": "storybook-pdf-export -o storybook.pdf"
+  }
+}
+```
+
+The [Storybook addon](#addon-optional-print-button-and-pdf-download-in-storybook) is a separate, optional extra for a print button and a download button in Storybook's toolbar. The export doesn't need it.
+
+### Browser
+
+PDFs are printed by a Chromium-based browser. By default (`--browser auto`) the tool takes the first one it finds:
+
+1. Playwright's own Chromium, if you installed it (`npx playwright-core install chromium`)
+2. **Google Chrome**
+3. **Microsoft Edge**
+
+So on most machines nothing needs to be installed, including company machines where only Edge is allowed. To choose explicitly:
 
 ```bash
-npx storybook-pdf-export http://localhost:6006 -o docs.pdf
+npx storybook-pdf-export --browser msedge                     # installed Edge
+npx storybook-pdf-export --browser chrome                     # installed Chrome
+npx storybook-pdf-export --browser-path "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
 ```
+
+The same works as `browser` / `browserPath` in the config file, or with the environment variables `STORYBOOK_PDF_BROWSER` and `STORYBOOK_PDF_BROWSER_PATH`, which is handy in CI. Pre-release channels like `chrome-beta` or `msedge-dev` work too. Firefox and Safari can't be used, because only Chromium can print a page to PDF this way.
 
 ### Let your AI set it up
 
 Using **Claude Code** or **Cursor**? Open your project and say:
+
+> "Export our Storybook as a PDF with npx storybook-pdf-export."
 
 > "Add storybook-pdf-export to this project: export the PDF after every Storybook build into storybook-static, and add the addon so there's a download button in the toolbar."
 
@@ -196,7 +234,9 @@ A complete example lives in [`examples/corporate`](examples/corporate/storybook-
 
 ---
 
-## Addon: print button and PDF download in Storybook
+## Addon (optional): print button and PDF download in Storybook
+
+Not needed for the export. Add it if readers of your Storybook should get the PDF right there. It needs the package as a dev dependency (`npm i -D storybook-pdf-export`).
 
 Make the PDF available right where people read your docs:
 
@@ -302,7 +342,8 @@ export default { title: 'Playground', tags: ['no-pdf'] };
 ```
 storybook-pdf-export [source] [options]
 
-  source              Static build directory or URL of a running Storybook (default: ./storybook-static)
+  source              Static build directory or URL of a running Storybook (default: ./storybook-static,
+                      built on the fly if missing)
 
   --config            Config file with theme, templates and hooks (default: ./storybook-pdf.config.js)
   -o, --output        Output file                                 (default: storybook.pdf)
@@ -317,7 +358,11 @@ storybook-pdf-export [source] [options]
       --landscape
       --no-cover / --no-toc / --no-page-numbers
       --storybook-url Public Storybook URL. Links to stories not in the PDF point there.
-      --chromium      Use an existing Chrome/Chromium (or env STORYBOOK_PDF_CHROMIUM)
+      --browser       auto | chromium | chrome | msedge        (default: auto)
+      --browser-path  Path to a Chrome / Chromium / Edge binary
+      --build         Always run "storybook build" first (into a temp folder)
+      --no-build      Never build; fail if there is no build
+      --config-dir    Storybook config folder used for building   (default: .storybook)
   -c, --concurrency   Pages rendered in parallel                  (default: 4)
       --timeout       Per-page timeout in ms                      (default: 30000)
       --delay         Extra wait per page in ms                   (default: 0)
@@ -357,7 +402,7 @@ All config file keys work here too. Pass `output: null` to get the bytes back wi
 
 ## How it works
 
-1. **Serve.** The static build is served on a random local port, because Storybook can't run from `file://`.
+1. **Serve.** The static build (or a fresh `storybook build` in a temporary folder) is served on a random local port, because Storybook can't run from `file://`.
 2. **Read the index.** It reads `index.json` (or `stories.json` from Storybook 6) and keeps the entries in sidebar order.
 3. **Render.** Each entry opens in `iframe.html?id=…&viewMode=docs|story` in headless Chromium (Playwright), laid out at the printable width of the paper. It waits for Storybook's `docsRendered` / `storyRendered` event, network idle, fonts and images (lazy images are loaded too), and 400 ms without DOM changes, capped at 10 s so a restless page can't hang the export. Then scroll containers and wide tables are fitted to the page, and it prints with the print stylesheet. A page that fails is reported and skipped, or fails the run with `--strict`.
 4. **Assemble.** It renders the cover, TOC, back page, header and footer from your templates and merges everything with pdf-lib. TOC entries and `?path=/docs/…` links become internal jumps, and bookmarks are added.
@@ -375,16 +420,16 @@ Everything runs on your machine or in your CI. No account, no upload, no API key
 
 ```bash
 npm install
-npx playwright install chromium
+npx playwright-core install chromium   # optional: Chrome or Edge work too
 
 npm test             # unit tests + end-to-end tests against a fake Storybook build
 npm run test:smoke   # builds a real Storybook 10 (test/fixtures/storybook) and checks the export
 npm run test:types   # type definitions
 ```
 
-The end-to-end tests are skipped locally when no browser is available (they never are on CI). To use an existing Chrome instead of Playwright's, set `STORYBOOK_PDF_CHROMIUM=/path/to/chrome`.
+The end-to-end tests are skipped locally when no browser is available (they never are on CI). Without Playwright's Chromium they use your installed Chrome or Edge. To use a specific binary, set `STORYBOOK_PDF_BROWSER_PATH=/path/to/chrome`.
 
-CI runs the tests on Node 20, 22 and 24 on Linux, plus Windows and macOS, along with the smoke test, the type check and a package dry-run.
+CI runs the tests on Node 20, 22 and 24 on Linux, plus Windows and macOS, once without Playwright's Chromium (falling back to the runner's Google Chrome), along with the smoke test, the type check and a package dry-run.
 
 Issues and pull requests are welcome.
 

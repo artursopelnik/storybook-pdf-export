@@ -25,7 +25,8 @@ Usage
   storybook-pdf-export [source] [options]
 
   source            Static build directory or URL of a running Storybook
-                    (default: ./storybook-static)
+                    (default: ./storybook-static; if there is none but a
+                    .storybook folder, Storybook is built on the fly)
 
 Options
       --config      Config file with theme, templates and hooks
@@ -44,7 +45,12 @@ Options
       --no-cover    Leave out the cover page
       --no-toc      Leave out the table of contents
       --no-page-numbers
-      --chromium    Path to a Chrome/Chromium binary (or env STORYBOOK_PDF_CHROMIUM)
+      --browser     auto | chromium | chrome | msedge        (default: auto)
+                      auto: Playwright's Chromium if installed, else Chrome, else Edge
+      --browser-path  Path to a Chrome / Chromium / Edge binary
+      --build       Always run "storybook build" first (into a temp folder)
+      --no-build    Never build; fail if there is no build
+      --config-dir  Storybook config folder used for building (default: .storybook)
       --storybook-url  Public Storybook URL; links to stories not in the PDF point there
   -c, --concurrency Pages rendered in parallel           (default: ${DEFAULTS.concurrency})
       --timeout     Per-page timeout in ms                (default: ${DEFAULTS.timeout})
@@ -55,7 +61,9 @@ Options
   -h, --help
 
 Examples
+  npx storybook-pdf-export                       # in your project: builds + exports
   npx storybook-pdf-export ./storybook-static -o design-system.pdf
+  npx storybook-pdf-export --browser msedge      # use the installed Edge
   npx storybook-pdf-export http://localhost:6006 --include "Components/**" --landscape
 `;
 
@@ -75,7 +83,12 @@ const options = {
   'no-toc': { type: 'boolean' },
   'no-page-numbers': { type: 'boolean' },
   'storybook-url': { type: 'string' },
-  chromium: { type: 'string' },
+  browser: { type: 'string' },
+  'browser-path': { type: 'string' },
+  chromium: { type: 'string' }, // deprecated alias of --browser-path
+  build: { type: 'boolean' },
+  'no-build': { type: 'boolean' },
+  'config-dir': { type: 'string' },
   concurrency: { type: 'string', short: 'c' },
   timeout: { type: 'string' },
   delay: { type: 'string' },
@@ -140,7 +153,10 @@ async function main() {
     toc: v['no-toc'] ? false : undefined,
     pageNumbers: v['no-page-numbers'] ? false : undefined,
     storybookUrl: v['storybook-url'],
-    chromium: v.chromium,
+    browser: v.browser,
+    browserPath: fromCli(v['browser-path'] ?? v.chromium),
+    build: v['no-build'] ? false : v.build,
+    configDir: v['config-dir'],
     concurrency: num(v.concurrency, 'concurrency'),
     timeout: num(v.timeout, 'timeout'),
     delay: num(v.delay, 'delay'),
@@ -161,10 +177,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  if (/Executable doesn't exist|browserType\.launch/.test(err.message)) {
-    console.error('Chromium for Playwright is missing. Install it with:\n\n  npx playwright install chromium\n\nor point --chromium at an existing Chrome/Chromium binary.');
-  } else {
-    console.error(`✗ ${err.message}`);
-  }
+  console.error(`✗ ${err.message}`);
   process.exit(1);
 });

@@ -4,21 +4,24 @@
  * Catches breakage when Storybook changes its DOM or CSS classes, which the
  * fake build in the e2e tests cannot.
  *
- *   npm run test:smoke   # installs + builds the fixture, then runs this
+ *   npm run test:smoke   # installs the fixture project, then runs this
  */
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { PDFDocument, PDFName, PDFDict } from 'pdf-lib';
 import { exportPdf } from '../src/index.js';
 
-const source = fileURLToPath(new URL('./fixtures/storybook/storybook-static', import.meta.url));
+// Exercises the on-the-fly build as well: `build: true` runs `storybook build`
+// from the fixture project into a temporary folder, like `npx storybook-pdf-export` does.
+const cwd = fileURLToPath(new URL('./fixtures/storybook/', import.meta.url));
 const checks = [];
 
 const result = await exportPdf({
-  source,
+  cwd,
+  source: './storybook-static',
+  build: true,
   output: null,
   title: 'Smoke',
-  chromium: process.env.STORYBOOK_PDF_CHROMIUM,
   log: (m) => console.log(m),
   strict: true,
   hooks: {

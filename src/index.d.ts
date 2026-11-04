@@ -1,5 +1,5 @@
 import type * as PDFLib from 'pdf-lib';
-import type { Page } from 'playwright';
+import type { Page } from 'playwright-core';
 
 export interface Entry {
   id: string;
@@ -129,8 +129,24 @@ export interface ExportOptions {
   pageNumbers?: boolean;
   /** Public Storybook URL. Links to stories that are not in the PDF point there. */
   storybookUrl?: string;
-  /** Path to a Chrome / Chromium binary. Default: Playwright's Chromium. */
+  /**
+   * Browser to print with. `auto` (default) uses Playwright's Chromium if it is
+   * installed, otherwise Google Chrome, otherwise Microsoft Edge. Any other
+   * Playwright channel name (e.g. `chrome-beta`, `msedge-dev`) works too.
+   * Env: STORYBOOK_PDF_BROWSER.
+   */
+  browser?: 'auto' | 'chromium' | 'chrome' | 'msedge' | (string & {});
+  /** Path to a Chrome / Chromium / Edge binary. Wins over `browser`. Env: STORYBOOK_PDF_BROWSER_PATH. */
+  browserPath?: string;
+  /** @deprecated Use `browserPath`. */
   chromium?: string;
+  /**
+   * Build the Storybook first? Default (unset): only if `source` has no build
+   * but a `.storybook` folder exists. `true`: always build, `false`: never.
+   */
+  build?: boolean;
+  /** Storybook config folder used for building. Default `.storybook`. */
+  configDir?: string;
   /** Pages rendered in parallel. Default 4. */
   concurrency?: number;
   /** Per-page timeout in ms. Default 30000. */
