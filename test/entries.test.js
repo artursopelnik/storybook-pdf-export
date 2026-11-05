@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normaliseIndex, selectEntries, buildTree, globToRegExp } from '../src/entries.js';
+import { normaliseIndex, selectEntries, buildTree, globToRegExp, sidebarOrder } from '../src/entries.js';
 
 const index = normaliseIndex({
   v: 5,
@@ -72,4 +72,39 @@ test('buildTree mirrors the sidebar', () => {
     '  Playground@4',
     '    X@4',
   ]);
+});
+
+test('entries follow the sidebar order, not the flat index order', () => {
+  // Index order (storySort / file order) with titles interleaved, as Storybook
+  // writes it when stories of one group live in different files.
+  const e = (id, title, name = 'Docs', type = 'docs') => ({ id, title, name, type, tags: [] });
+  const list = normaliseIndex({
+    v: 5,
+    entries: {
+      'intro--docs': e('intro--docs', 'Intro'),
+      'components-button--docs': e('components-button--docs', 'Components/Button'),
+      'foundations-colors--docs': e('foundations-colors--docs', 'Foundations/Colors'),
+      'components-forms-input--docs': e('components-forms-input--docs', 'Components/Forms/Input'),
+      'components-button--primary': e('components-button--primary', 'Components/Button', 'Primary', 'story'),
+      'foundations-spacing--docs': e('foundations-spacing--docs', 'Foundations/Spacing'),
+      'components-forms-select--docs': e('components-forms-select--docs', 'components / forms/Select'),
+      'components-badge--docs': e('components-badge--docs', 'Components/Badge'),
+    },
+  });
+  assert.deepEqual(ids(list), [
+    'intro--docs',
+    'components-button--docs',
+    'components-button--primary',
+    'components-forms-input--docs',
+    'components-forms-select--docs',
+    'components-badge--docs',
+    'foundations-colors--docs',
+    'foundations-spacing--docs',
+  ]);
+  // One group per sidebar node in the TOC / bookmarks.
+  const tree = buildTree(selectEntries(list));
+  assert.deepEqual(tree.map((n) => n.label), ['Intro', 'Components', 'Foundations']);
+  assert.deepEqual(tree[1].children.map((n) => n.label), ['Button', 'Forms', 'Badge']);
+  // Already grouped input stays as it is.
+  assert.deepEqual(ids(sidebarOrder(list)), ids(list));
 });

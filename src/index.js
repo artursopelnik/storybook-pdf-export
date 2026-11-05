@@ -16,7 +16,7 @@ import { NO_MARGIN, isUrl, firstLine, formatTitle, entryLabel, plural, readProje
 
 const { PDFDocument } = PDFLib;
 
-export { normaliseIndex, selectEntries, buildTree } from './entries.js';
+export { normaliseIndex, selectEntries, buildTree, sidebarOrder } from './entries.js';
 export { defaults as templates, esc };
 
 /** Identity helper for typed / documented config files. */

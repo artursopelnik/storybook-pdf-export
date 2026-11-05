@@ -189,7 +189,10 @@ export interface ExportResult {
 export function exportPdf(options: ExportOptions): Promise<ExportResult>;
 export function defineConfig(config: ExportOptions | (() => ExportOptions | Promise<ExportOptions>)): typeof config;
 
+/** Reads index.json / stories.json; entries come back in sidebar order. */
 export function normaliseIndex(json: unknown): Entry[];
+/** Orders entries like Storybook's sidebar: grouped by title path, each group where it first appears. */
+export function sidebarOrder(entries: Entry[]): Entry[];
 export function selectEntries(entries: Entry[], options?: Pick<ExportOptions, 'mode' | 'include' | 'exclude'>): Entry[];
 
 export const DEFAULTS: Readonly<Required<Pick<ExportOptions, 'output' | 'mode' | 'format' | 'landscape' | 'cover' | 'toc' | 'pageNumbers' | 'concurrency' | 'timeout' | 'delay' | 'strict' | 'expandTabs' | 'port'>>>;

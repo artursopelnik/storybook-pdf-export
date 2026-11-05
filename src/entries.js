@@ -4,20 +4,57 @@
 
 export const EXCLUDE_TAGS = ['no-pdf', '!pdf'];
 
-/** Normalises index.json (v7+) and the legacy stories.json (v6) format. */
+/**
+ * Normalises index.json (v7+) and the legacy stories.json (v6) format and
+ * returns the entries in sidebar order (see `sidebarOrder`).
+ */
 export function normaliseIndex(json) {
   const raw = json?.entries ?? json?.stories;
   if (!raw || typeof raw !== 'object') {
     throw new Error('Unrecognised Storybook index: expected an "entries" (index.json) or "stories" (stories.json) object.');
   }
-  return Object.values(raw).filter((e) => e?.id && (e.title ?? e.kind)).map((e) => ({
+  return sidebarOrder(Object.values(raw).filter((e) => e?.id && (e.title ?? e.kind)).map((e) => ({
     id: e.id,
     title: e.title ?? e.kind,
     name: e.name ?? e.story,
     type: e.type ?? (e.parameters?.docsOnly ? 'docs' : 'story'),
     tags: e.tags ?? [],
     importPath: e.importPath,
-  }));
+  })));
+}
+
+/** Like Storybook's `sanitize`: "Forms " and "forms" are the same sidebar node. */
+const nodeKey = (segment) =>
+  segment.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '');
+
+/**
+ * Orders entries like Storybook's sidebar. The index lists entries in
+ * storySort / file order, but the sidebar groups them by title path: a group
+ * or component sits where it first appears, and everything that belongs to
+ * it is listed there, even if the index has other titles in between.
+ *
+ *   A/X, B/Y, A/Z  →  A/X, A/Z, B/Y
+ */
+export function sidebarOrder(entries) {
+  const root = { items: [], children: new Map() };
+  for (const entry of entries) {
+    let node = root;
+    for (const segment of entry.title.split('/')) {
+      const key = nodeKey(segment);
+      let child = node.children.get(key);
+      if (!child) {
+        child = { items: [], children: new Map() };
+        node.children.set(key, child);
+        node.items.push(child);
+      }
+      node = child;
+    }
+    node.items.push(entry);
+  }
+  const out = [];
+  const walk = (node) => node.items.forEach((item) => (item.items ? walk(item) : out.push(item)));
+  walk(root);
+  return out;
 }
 
 /** Turns a simple glob (`*` = anything inside a segment, `**` = anything) into a RegExp. */
@@ -105,22 +142,23 @@ export function selectEntries(entries, { mode = 'auto', include = [], exclude = 
  */
 export function buildTree(entries) {
   const root = { label: null, children: [], entry: -1 };
+  const titleKey = (title) => title.split('/').map(nodeKey).join('/');
   const perTitle = new Map();
-  for (const e of entries) perTitle.set(e.title, (perTitle.get(e.title) ?? 0) + 1);
+  for (const e of entries) perTitle.set(titleKey(e.title), (perTitle.get(titleKey(e.title)) ?? 0) + 1);
 
   entries.forEach((entry, index) => {
     let node = root;
     for (const seg of entry.title.split('/').map((s) => s.trim())) {
       let child = node.children.at(-1);
-      if (!child || child.label !== seg || child.leaf) {
-        child = { label: seg, children: [], entry: index };
+      if (!child || child.key !== nodeKey(seg) || child.leaf) {
+        child = { label: seg, key: nodeKey(seg), children: [], entry: index };
         node.children.push(child);
       }
       node = child;
     }
     // A single docs page is represented by its title node; anything else
     // (multiple docs pages, stories) gets its own leaf below the title.
-    const single = perTitle.get(entry.title) === 1 && entry.type === 'docs';
+    const single = perTitle.get(titleKey(entry.title)) === 1 && entry.type === 'docs';
     if (!single) node.children.push({ label: entry.name, children: [], entry: index, leaf: true });
   });
 

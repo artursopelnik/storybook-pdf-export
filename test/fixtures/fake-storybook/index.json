@@ -24,18 +24,18 @@
       "type": "story",
       "tags": []
     },
-    "components-badge--default": {
-      "id": "components-badge--default",
-      "title": "Components/Badge",
-      "name": "Default",
-      "type": "story",
-      "tags": []
-    },
     "foundations-tables--docs": {
       "id": "foundations-tables--docs",
       "title": "Foundations/Tables",
       "name": "Docs",
       "type": "docs",
+      "tags": []
+    },
+    "components-badge--default": {
+      "id": "components-badge--default",
+      "title": "Components/Badge",
+      "name": "Default",
+      "type": "story",
       "tags": []
     },
     "foundations-tabs--docs": {

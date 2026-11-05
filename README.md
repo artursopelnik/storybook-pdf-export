@@ -472,7 +472,7 @@ All config file keys work here too. Pass `output: null` to get the bytes back wi
 ## How it works
 
 1. **Serve.** The static build (or a fresh `storybook build` in a temporary folder) is served on a random local port, because Storybook can't run from `file://`.
-2. **Read the index.** It reads `index.json` (or `stories.json` from Storybook 6) and keeps the entries in sidebar order.
+2. **Read the index.** It reads `index.json` (or `stories.json` from Storybook 6) and puts the entries in sidebar order: like Storybook's sidebar, entries are grouped by their title path and each group sits where it first appears in the index (which follows your `storySort`), even if other titles come in between.
 3. **Render.** Each entry opens in `iframe.html?id=…&viewMode=docs|story` in headless Chromium (Playwright), laid out at the printable width of the paper. It waits for Storybook's `docsRendered` / `storyRendered` event, network idle, fonts and images (lazy images are loaded too), and 400 ms without DOM changes, capped at 10 s so a restless page can't hang the export. Then scroll containers and wide tables are fitted to the page, and it prints with the print stylesheet. A page that fails is reported and skipped, or fails the run with `--strict`.
 4. **Assemble.** It renders the cover, TOC, back page, header and footer from your templates and merges everything with pdf-lib. TOC entries and `?path=/docs/…` links become internal jumps, and bookmarks are added.
 
