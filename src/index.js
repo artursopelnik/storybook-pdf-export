@@ -320,7 +320,7 @@ async function renderEntries(context, { base, entries, css, pdfOptions, printWid
         const i = next++;
         const entry = entries[i];
         try {
-          let pdf = await renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay: o.delay, expandTabs: o.expandTabs, beforeRender: o.hooks.beforeRender });
+          let pdf = await renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay: o.delay, expandTabs: o.expandTabs, beforeRender: o.hooks.beforeRender, warn: o.warn });
           if (o.hooks.afterRender) pdf = (await o.hooks.afterRender({ entry, pdf })) ?? pdf;
           rendered[i] = await PDFDocument.load(pdf);
         } catch (error) {

@@ -156,7 +156,9 @@ export interface ExportOptions {
   /**
    * Print every tab of tab sets (`role="tablist"` / `role="tab"`), one after
    * another under its label, instead of only the active one. Also finds tab
-   * sets in open shadow roots (web components). Default true.
+   * sets in open shadow roots and slots (web components), waits for them to
+   * hydrate, and expands nested tab sets. Tab sets that can't be expanded are
+   * reported through `warn`. Default true.
    * Opt out per tab set with the class `sb-print-no-fit`.
    */
   expandTabs?: boolean;

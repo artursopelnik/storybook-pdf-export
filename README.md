@@ -358,22 +358,26 @@ Nothing is cut off, and the rest of the page keeps its size. The toolbar's print
 
 ### Tabs
 
-Paper can't click, so tab sets would only show the active tab. Before printing, every tab set with the usual ARIA roles (`role="tablist"`, `role="tab"`, `role="tabpanel"`) is expanded: all tabs are printed one after another, each under its label, and the tab bar is hidden. Disabled tabs are skipped.
+Paper can't click, so tab sets would only show the active tab. Before printing, every tab set with the usual ARIA roles (`role="tablist"`, `role="tab"`, `role="tabpanel"`) is expanded: all tabs are printed one after another, in tab order, each under its label, and the tab bar is hidden. Disabled tabs are skipped.
+
+Web components often render after Storybook reports the page as rendered, so the export first waits (bounded) until custom elements are defined and the DOM, including open shadow roots, has stopped changing. After expanding, it waits again for images and fonts in the revealed panels.
 
 It works with the common ways tabs are built:
 
 | tab component | what happens |
 | --- | --- |
-| **Web components / Shadow DOM** (Lit, Stencil, your own `<x-tabs>`): tabs and panels inside an open shadow root | found by walking open shadow roots; inactive panels (`hidden` or hidden by the component's CSS) are revealed in place |
+| **Web components / Shadow DOM** (Lit, Stencil, your own `<x-tabs>`): tabs and panels inside an open shadow root, or panels in light-DOM hosts (`<x-tab-panel>`) whose own shadow root holds the `role="tabpanel"` and a slot | found by walking the composed tree (open shadow roots, slots); inactive panels (`hidden` or hidden by the component's CSS) are revealed in place, keeping slots, content and styles |
 | **Light DOM panels slotted** into a web component (`<div slot="panel" role="tabpanel">`) | revealed in place; the label goes into the same slot |
 | **All panels in the DOM**, inactive ones `hidden` (Radix, Headless UI, plain HTML) | revealed in place |
-| **Only the active panel is rendered** (most React tab components) | each tab is clicked in turn and its content copied |
+| **Only the active panel is rendered** (most React tab components) | each tab is clicked in turn and its content copied as rendered, including content of shadow roots and slots |
+| **Nested tab sets** | expanded once their parent panel is visible |
 
-Panels are matched to tabs through `aria-controls`, or by order when the panels sit next to the tab list.
+Each tab list is matched only to its own panels: through `aria-controls` when every tab points to a panel in its own document or shadow root, otherwise by order among the panels of its tab set, leaving out nested tab sets and their panels.
 
 - Turn it off with `--no-expand-tabs` (or `expandTabs: false`), or for one tab set with the class `sb-print-no-fit` on it or on a parent (also on the host element of a web component).
 - Restyle the labels with your own `--css`: `.sb-pdf-tab-label` (label), `.sb-pdf-tab` / `.sb-pdf-tabs` (copied tabs). Labels inside a shadow root get their styles injected there, as page CSS doesn't reach into shadow roots.
-- Not covered: tab components without ARIA roles, closed shadow roots, and nested tab sets inside a tab that only renders its active panel (those show their active tab).
+- Tab sets that can't be expanded (a tab doesn't react to clicks, or renders an empty panel) are reported as a warning; empty panels are left out instead of being printed blank.
+- Not covered: tab components without ARIA roles and closed shadow roots.
 
 ### Icons with CSS masks
 

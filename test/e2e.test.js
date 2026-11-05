@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { PDFDocument, PDFName, PDFDict, PDFArray, PDFString, PDFHexString } from 'pdf-lib';
 import { exportPdf } from '../src/index.js';
 import { launchBrowser } from '../src/browser.js';
+import { pdfText } from './pdf-text.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fake-storybook', import.meta.url));
 const browserPath = process.env.STORYBOOK_PDF_BROWSER_PATH ?? process.env.STORYBOOK_PDF_CHROMIUM;
@@ -73,8 +74,8 @@ test('exports docs pages and story-only components with TOC, bookmarks and links
   const result = await run(t, { title: 'Fake DS', log: (m) => logs.push(m) });
   if (!result) return;
 
-  // Intro, Button docs, Badge story, Tables, Tabs; Broken fails, Secret is tagged no-pdf.
-  assert.deepEqual(result.entries.map((e) => e.id), ['intro--docs', 'components-button--docs', 'components-badge--default', 'foundations-tables--docs', 'foundations-tabs--docs']);
+  // Intro, Button docs, Badge story, Tables, Tabs, Web Components; Broken fails, Secret is tagged no-pdf.
+  assert.deepEqual(result.entries.map((e) => e.id), ['intro--docs', 'components-button--docs', 'components-badge--default', 'foundations-tables--docs', 'foundations-tabs--docs', 'foundations-web-components--docs']);
   assert.deepEqual(result.failed.map((f) => f.entry.id), ['components-broken--docs']);
   assert.match(result.failed[0].error.message, /Boom: component threw/);
 
@@ -82,7 +83,7 @@ test('exports docs pages and story-only components with TOC, bookmarks and links
   assert.equal(doc.getPageCount(), result.pages);
   assert.equal(doc.getTitle(), 'Fake DS');
 
-  assert.deepEqual(outline(doc), ['Intro', 'Components', '  Button', '  Badge', '    Default', 'Foundations', '  Tables', '  Tabs']);
+  assert.deepEqual(outline(doc), ['Intro', 'Components', '  Button', '  Badge', '    Default', 'Foundations', '  Tables', '  Tabs', '  Web Components']);
 
   const all = links(doc);
   // TOC (page 2) links to every bookmark target.
@@ -316,6 +317,105 @@ test('expandTabs: false prints only the active tab', async (t) => {
   assert.ok(!seen.text.includes('Content of Usage'));
   assert.ok(!seen.text.includes('Shadow Beta content'));
   assert.deepEqual(seen.tablistsShown, [true, true, true, true]);
+});
+
+/** Asserts that every line appears exactly once in the PDF text, in the given order. */
+const assertInOrder = (text, expected) => {
+  const lines = text.split('\n').map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  let at = -1;
+  for (const line of expected) {
+    assert.equal(lines.filter((l) => l === line).length, 1, `"${line}" appears once in the PDF:\n${text}`);
+    const i = lines.indexOf(line);
+    assert.ok(i > at, `"${line}" comes after the previous one:\n${text}`);
+    at = i;
+  }
+};
+
+test('PDF: light-DOM, shadow-DOM and slotted tabs, every enabled panel once in tab order', async (t) => {
+  const warnings = [];
+  const result = await run(t, { include: ['Foundations/Tabs'], cover: false, toc: false, warn: (m) => warnings.push(m) });
+  if (!result) return;
+  const text = (await pdfText(result.bytes)).join('\n');
+  assertInOrder(text, [
+    'Overview', 'Content of Overview', 'Usage', 'Content of Usage',
+    'Do', 'Do content', "Don't", 'Dont content',
+    'Kept A content',
+    'Alpha', 'Shadow Alpha content', 'Beta', 'Shadow Beta content', 'Gamma', 'Shadow Gamma content',
+    'Slotted One content', 'Slotted Two content',
+  ]);
+  assert.ok(!text.includes('Content of Disabled'), 'disabled tab skipped');
+  assert.ok(!text.includes('Kept B content'), 'opted-out tab set keeps only its active tab');
+  assert.deepEqual(warnings, []);
+});
+
+test('PDF: Stencil-like web components (late hydration, panels in shadow roots, nested and lazy tab sets)', async (t) => {
+  const warnings = [];
+  const result = await run(t, { include: ['Foundations/Web Components'], cover: false, toc: false, warn: (m) => warnings.push(m) });
+  if (!result) return;
+  assert.equal(result.failed.length, 0);
+  const text = (await pdfText(result.bytes)).join('\n');
+  assertInOrder(text, [
+    // Outer tab set: panels revealed in place, nested tab set expanded inside "Usage".
+    'Install', 'Outer install text',
+    'Usage', 'Outer usage text', 'React', 'Inner react text', 'Vue', 'Inner vue text',
+    'API', 'Outer api text',
+    // Only the active panel is rendered: clicked through, shadow and slot content copied.
+    'Colors', 'Lazy Colors card', 'Colors slotted note',
+    'Spacing', 'Lazy Spacing card', 'Spacing slotted note',
+    'Motion', 'Lazy Motion card', 'Motion slotted note',
+    // Opted out: tab bar and active tab only.
+    'Kept One', 'Kept Two', 'Kept wc one text',
+  ]);
+  assert.ok(!/Legacy|legacy/.test(text), 'disabled tab and its panel are left out');
+  assert.ok(!text.includes('Kept wc two text'));
+  assert.deepEqual(warnings, []);
+});
+
+test('expandTabs reports tab sets it cannot expand instead of printing empty panels', async (t) => {
+  if (browserMissing) return t.skip();
+  const { expandTabs } = await import('../src/prepare.js');
+  const browser = await openBrowser();
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <div id="dead">
+        <div role="tablist">
+          <button role="tab" aria-selected="true" aria-controls="dead-panel">First</button>
+          <button role="tab" aria-selected="false" aria-controls="dead-panel">Second</button>
+        </div>
+        <div role="tabpanel" id="dead-panel"><p>First content</p></div>
+      </div>
+      <div id="blank">
+        <div role="tablist">
+          <button role="tab" aria-selected="true" aria-controls="blank-panel">One</button>
+          <button role="tab" aria-selected="false" aria-controls="blank-panel">Two</button>
+          <button role="tab" aria-selected="false" aria-controls="blank-panel">Three</button>
+        </div>
+        <div role="tabpanel" id="blank-panel"><p>One content</p></div>
+      </div>
+      <script>
+        // "Two" renders an empty panel; "Second" ignores clicks.
+        document.querySelector('#blank').addEventListener('click', (e) => {
+          const tab = e.target.closest('[role="tab"]');
+          for (const t of document.querySelectorAll('#blank [role="tab"]')) t.setAttribute('aria-selected', String(t === tab));
+          document.getElementById('blank-panel').innerHTML = tab.textContent === 'Two' ? '<p> </p>' : '<p>' + tab.textContent + ' content</p>';
+        });
+      </script>`);
+    const stats = await page.evaluate(expandTabs);
+    assert.equal(stats.tabsets, 1);
+    assert.equal(stats.tabs, 2);
+    assert.match(stats.skipped.join('\n'), /"First, Second": no content for "Second"/);
+    assert.match(stats.skipped.join('\n'), /"First, Second": could not be expanded/);
+    assert.match(stats.skipped.join('\n'), /"One, Two, Three": no content for "Two"/);
+    const seen = await page.evaluate(() => ({
+      dead: document.querySelector('#dead [role="tablist"]').getClientRects().length > 0,
+      blank: document.querySelector('#blank .sb-pdf-tabs').innerText,
+    }));
+    assert.ok(seen.dead, 'tab set that could not be expanded is left as it is');
+    assert.match(seen.blank, /One\s+One content\s+Three\s+Three content/);
+  } finally {
+    await browser.close();
+  }
 });
 
 test('CSS mask icons are printed as colored vector backgrounds (no hairline edges)', async (t) => {

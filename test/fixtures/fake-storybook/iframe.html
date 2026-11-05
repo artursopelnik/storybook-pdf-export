@@ -70,6 +70,29 @@
         <p><i id="mask-icon" style="display:inline-block;width:24px;height:24px;background-color:rgb(200, 0, 0);
           mask-image:url(data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="currentColor"/></svg>')});
           mask-repeat:no-repeat;mask-size:contain"></i></p>`,
+      // Stencil-like web components, defined only after the "rendered" event
+      // (lazy loading / hydration): tab bar in x-tabs' shadow root, light-DOM
+      // x-tab-panel hosts whose own shadow roots hold the hidden tabpanel and
+      // a slot, a nested tab set and a disabled tab. Then a component that
+      // renders only its active panel, with a shadow-DOM card in it.
+      'foundations-web-components--docs': `<h1>Web Components</h1>
+        <x-tabs id="outer-tabs">
+          <x-tab-panel label="Install"><p>Outer install text</p></x-tab-panel>
+          <x-tab-panel label="Usage">
+            <p>Outer usage text</p>
+            <x-tabs id="inner-tabs">
+              <x-tab-panel label="React"><p>Inner react text</p></x-tab-panel>
+              <x-tab-panel label="Vue"><p>Inner vue text</p></x-tab-panel>
+            </x-tabs>
+          </x-tab-panel>
+          <x-tab-panel label="Legacy" disabled><p>Outer legacy text</p></x-tab-panel>
+          <x-tab-panel label="API"><p>Outer api text</p></x-tab-panel>
+        </x-tabs>
+        <x-lazy-tabs id="lazy-tabs" labels='["Colors","Spacing","Motion"]'></x-lazy-tabs>
+        <x-tabs id="kept-wc-tabs" class="sb-print-no-fit">
+          <x-tab-panel label="Kept One"><p>Kept wc one text</p></x-tab-panel>
+          <x-tab-panel label="Kept Two"><p>Kept wc two text</p></x-tab-panel>
+        </x-tabs>`,
     };
     // Web component tabs: everything in the shadow DOM, inactive panels `hidden`
     // (the shadow style forces that with !important), plus a mask icon in there.
@@ -97,6 +120,84 @@
           </div><slot name="panel"></slot>`;
       }
     });
+    // Stencil-like components: defined late, render asynchronously (like
+    // componentWillLoad), mark themselves `hydrated`. aria-controls point to
+    // IDs that live in other shadow roots, so they don't resolve (the same IDs
+    // repeat in the nested tab set).
+    const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+    const defineWebComponents = () => {
+      customElements.define('x-tabs', class extends HTMLElement {
+        async connectedCallback() {
+          if (this.shadowRoot) return;
+          await tick(40);
+          const panels = [...this.children].filter((c) => c.localName === 'x-tab-panel');
+          const root = this.attachShadow({ mode: 'open' });
+          root.innerHTML = `<style>:host { display: block; margin: 8px 0 } .bar { display: flex; gap: 4px }</style>
+            <div class="bar" role="tablist">${panels.map((p, i) => `<button role="tab" aria-controls="panel-${i}"
+              aria-selected="${i === 0}"${p.hasAttribute('disabled') ? ' disabled aria-disabled="true"' : ''}>${p.getAttribute('label')}</button>`).join('')}</div>
+            <slot></slot>`;
+          const select = (i) => {
+            root.querySelectorAll('[role="tab"]').forEach((t, k) => t.setAttribute('aria-selected', String(k === i)));
+            panels.forEach((p, k) => p.toggleAttribute('active', k === i));
+          };
+          root.addEventListener('click', (e) => {
+            const tab = e.target.closest('[role="tab"]');
+            if (tab && !tab.disabled) select([...root.querySelectorAll('[role="tab"]')].indexOf(tab));
+          });
+          select(0);
+          this.classList.add('hydrated');
+        }
+      });
+      customElements.define('x-tab-panel', class extends HTMLElement {
+        static observedAttributes = ['active'];
+        async connectedCallback() {
+          if (this.shadowRoot) return;
+          await tick(60);
+          const root = this.attachShadow({ mode: 'open' });
+          root.innerHTML = `<style>:host { display: block } :host(:not([active])) { display: none }
+              [hidden] { display: none !important } .body { display: flex; flex-direction: column; padding: 4px; border: 1px solid #ddd }</style>
+            <div class="body" role="tabpanel" id="panel"><slot></slot></div>`;
+          this.attributeChangedCallback();
+          this.classList.add('hydrated');
+        }
+        attributeChangedCallback() {
+          this.shadowRoot?.querySelector('[role="tabpanel"]').toggleAttribute('hidden', !this.hasAttribute('active'));
+        }
+      });
+      // Only the active panel is rendered, after a short delay.
+      customElements.define('x-lazy-tabs', class extends HTMLElement {
+        async connectedCallback() {
+          if (this.shadowRoot) return;
+          await tick(30);
+          const labels = JSON.parse(this.getAttribute('labels'));
+          const root = this.attachShadow({ mode: 'open' });
+          root.innerHTML = `<div role="tablist">${labels.map((l, i) => `<button role="tab" aria-controls="lazy-panel" aria-selected="${i === 0}">${l}</button>`).join('')}</div>
+            <div role="tabpanel" id="lazy-panel"></div>`;
+          const render = (i) => {
+            root.querySelectorAll('[role="tab"]').forEach((t, k) => t.setAttribute('aria-selected', String(k === i)));
+            setTimeout(() => {
+              root.getElementById('lazy-panel').innerHTML = `<x-card heading="${labels[i]}"><span>${labels[i]} slotted note</span></x-card>`;
+            }, 60);
+          };
+          root.addEventListener('click', (e) => {
+            const tab = e.target.closest('[role="tab"]');
+            if (tab) render([...root.querySelectorAll('[role="tab"]')].indexOf(tab));
+          });
+          render(0);
+          this.classList.add('hydrated');
+        }
+      });
+      // Text only in the shadow root, plus slotted light-DOM content.
+      customElements.define('x-card', class extends HTMLElement {
+        async connectedCallback() {
+          if (this.shadowRoot) return;
+          await tick(20);
+          this.attachShadow({ mode: 'open' }).innerHTML = `<style>.card { border: 1px solid #090; padding: 4px; color: rgb(0, 90, 0) }</style>
+            <div class="card"><strong>Lazy ${this.getAttribute('heading')} card</strong> <slot></slot></div>`;
+        }
+      });
+    };
+    setTimeout(defineWebComponents, 700);
     // Tab behaviour of the two fixtures above.
     document.addEventListener('click', (event) => {
       const tab = event.target.closest('[role="tab"]');

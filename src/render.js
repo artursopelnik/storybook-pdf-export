@@ -4,7 +4,7 @@
  */
 import { entryLabel } from './util.js';
 import { fitForPrint } from './fit.js';
-import { expandTabs as expandTabsInPage, vectorizeMasks } from './prepare.js';
+import { expandTabs as expandTabsInPage, settlePage, vectorizeMasks } from './prepare.js';
 
 /** How long the DOM has to stay unchanged before a page counts as rendered. */
 const QUIET_MS = 400;
@@ -34,7 +34,7 @@ export function listenForRender() {
 }
 
 /** Opens a docs page or story, waits until it is rendered and returns its PDF. */
-export async function renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay = 0, expandTabs = true, beforeRender }) {
+export async function renderEntry(page, { base, entry, css, pdfOptions, printWidth, delay = 0, expandTabs = true, beforeRender, warn }) {
   const viewMode = entry.type === 'docs' ? 'docs' : 'story';
   const url = new URL(`iframe.html?id=${encodeURIComponent(entry.id)}&viewMode=${viewMode}`, base);
 
@@ -52,11 +52,19 @@ export async function renderEntry(page, { base, entry, css, pdfOptions, printWid
     }, entryLabel(entry));
   }
 
-  // Paper can't click: show every tab, not just the active one. Before
-  // settling, so images and fonts in the revealed panels load too.
-  if (expandTabs) await page.evaluate(expandTabsInPage);
-
-  await settle(page, delay);
+  // Paper can't click: show every tab, not just the active one. Storybook's
+  // "rendered" event can come before web components hydrate, so settle first
+  // (custom elements defined, DOM and shadow roots quiet); settle again after
+  // expanding, so images and fonts in the revealed panels load too.
+  let changed = true;
+  if (expandTabs) {
+    await settle(page);
+    const stats = await page.evaluate(expandTabsInPage);
+    for (const msg of stats.skipped) warn?.(`⚠ ${entryLabel(entry)}: ${msg}`);
+    changed = stats.tabsets > 0;
+  }
+  if (changed) await settle(page, delay);
+  else if (delay) await page.waitForTimeout(delay);
 
   // Scroll containers can't scroll on paper: expand / open / scale them.
   await page.emulateMedia({ media: 'print' });
@@ -109,41 +117,12 @@ export async function renderHtml(page, html, pdfOptions) {
 }
 
 /**
- * Waits for network, fonts, images and animations to calm down, so the PDF
- * shows the final state. Bounded in time: a misbehaving page delays the
+ * Waits for network, web component hydration, fonts, images and animations to
+ * calm down, so the PDF shows the final state. Bounded in time: a misbehaving page delays the
  * export, it never hangs it.
  */
 export async function settle(page, delay = 0) {
   await page.waitForLoadState('networkidle', { timeout: SETTLE_MAX_MS }).catch(() => {});
-  await page.evaluate(
-    async ({ quietMs, maxMs }) => {
-      const work = (async () => {
-        // Lazy images below the fold would never load (and never fire onload).
-        for (const img of document.images) if (img.loading === 'lazy') img.loading = 'eager';
-        await document.fonts?.ready;
-        await Promise.all(
-          [...document.images]
-            .filter((img) => !img.complete)
-            .map((img) => new Promise((r) => { img.addEventListener('load', r, { once: true }); img.addEventListener('error', r, { once: true }); })),
-        );
-        // Finish CSS animations / transitions so we don't print a half-faded state.
-        for (const a of document.getAnimations?.() ?? []) {
-          try { a.finish(); } catch {}
-        }
-        // Lazy parts (inline stories in docs, code snippets) keep mutating the
-        // DOM for a moment after the render event: wait for a quiet period.
-        await new Promise((resolve) => {
-          let timer;
-          const done = () => { observer.disconnect(); resolve(); };
-          const observer = new MutationObserver(() => { clearTimeout(timer); timer = setTimeout(done, quietMs); });
-          observer.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
-          timer = setTimeout(done, quietMs);
-        });
-      })();
-      await Promise.race([work, new Promise((r) => setTimeout(r, maxMs))]);
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    },
-    { quietMs: QUIET_MS, maxMs: SETTLE_MAX_MS },
-  );
+  await page.evaluate(settlePage, { quietMs: QUIET_MS, maxMs: SETTLE_MAX_MS });
   if (delay) await page.waitForTimeout(delay);
 }

@@ -45,6 +45,13 @@
       "type": "docs",
       "tags": []
     },
+    "foundations-web-components--docs": {
+      "id": "foundations-web-components--docs",
+      "title": "Foundations/Web Components",
+      "name": "Docs",
+      "type": "docs",
+      "tags": []
+    },
     "components-broken--docs": {
       "id": "components-broken--docs",
       "title": "Components/Broken",
