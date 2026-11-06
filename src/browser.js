@@ -5,10 +5,10 @@
  * allowed on company machines.
  */
 
-/** Values for the `browser` option. Any other Playwright channel name (e.g. `chrome-beta`, `msedge-dev`) works too. */
-export const BROWSERS = ['auto', 'chromium', 'chrome', 'msedge'];
-
-/** Order in which `auto` tries browsers. */
+/**
+ * Order in which `browser: 'auto'` tries browsers. `browser` also takes any
+ * of these by name, or any other Playwright channel (`chrome-beta`, `msedge-dev`).
+ */
 const AUTO_ORDER = ['chromium', 'chrome', 'msedge'];
 
 const LABELS = { chromium: "Playwright's Chromium", chrome: 'Google Chrome', msedge: 'Microsoft Edge' };

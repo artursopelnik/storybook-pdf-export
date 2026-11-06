@@ -138,8 +138,6 @@ export interface ExportOptions {
   browser?: 'auto' | 'chromium' | 'chrome' | 'msedge' | (string & {});
   /** Path to a Chrome / Chromium / Edge binary. Wins over `browser`. Env: STORYBOOK_PDF_BROWSER_PATH. */
   browserPath?: string;
-  /** @deprecated Use `browserPath`. */
-  chromium?: string;
   /**
    * Build the Storybook first? Default (unset): only if `source` has no build
    * but a `.storybook` folder exists. `true`: always build, `false`: never.
@@ -201,12 +199,14 @@ export const PRINT_CSS_PATH: string;
 export function esc(value: unknown): string;
 
 /** The default templates, to build on in your own. */
-export const templates: {
+export const templates: Readonly<{
   cover(ctx: TemplateContext): string;
   toc(ctx: TocContext): string;
   header(ctx: PageContext): string;
   footer(ctx: PageContext): string;
   back(ctx: TemplateContext): string;
+  /** Extra template CSS (empty by default). */
+  css: string;
   DEFAULT_THEME: Required<Theme>;
   BASE_CSS: string;
-};
+}>;

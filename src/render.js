@@ -4,7 +4,7 @@
  */
 import { entryLabel } from './util.js';
 import { fitForPrint } from './fit.js';
-import { expandTabs as expandTabsInPage, settlePage, vectorizeMasks } from './prepare.js';
+import { expandTabs as expandTabsInPage, inPage, settlePage, vectorizeMasks } from './prepare.js';
 
 /** How long the DOM has to stay unchanged before a page counts as rendered. */
 const QUIET_MS = 400;
@@ -59,7 +59,7 @@ export async function renderEntry(page, { base, entry, css, pdfOptions, printWid
   let changed = true;
   if (expandTabs) {
     await settle(page);
-    const stats = await page.evaluate(expandTabsInPage);
+    const stats = await page.evaluate(inPage(expandTabsInPage));
     for (const msg of stats.skipped) warn?.(`⚠ ${entryLabel(entry)}: ${msg}`);
     changed = stats.tabsets > 0;
   }
@@ -69,7 +69,7 @@ export async function renderEntry(page, { base, entry, css, pdfOptions, printWid
   // Scroll containers can't scroll on paper: expand / open / scale them.
   await page.emulateMedia({ media: 'print' });
   try {
-    await page.evaluate(vectorizeMasks);
+    await page.evaluate(inPage(vectorizeMasks));
     await page.evaluate(fitForPrint, { width: printWidth });
     if (beforeRender) await beforeRender({ page, entry });
     return await page.pdf(pdfOptions);
@@ -123,6 +123,6 @@ export async function renderHtml(page, html, pdfOptions) {
  */
 export async function settle(page, delay = 0) {
   await page.waitForLoadState('networkidle', { timeout: SETTLE_MAX_MS }).catch(() => {});
-  await page.evaluate(settlePage, { quietMs: QUIET_MS, maxMs: SETTLE_MAX_MS });
+  await page.evaluate(inPage(settlePage, { quietMs: QUIET_MS, maxMs: SETTLE_MAX_MS }));
   if (delay) await page.waitForTimeout(delay);
 }

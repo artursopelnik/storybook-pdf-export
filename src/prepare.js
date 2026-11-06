@@ -1,13 +1,72 @@
 /**
- * Page preparations that run in the browser right before printing. Every
- * exported function is self-contained on purpose: they are serialised and
- * evaluated in the page.
+ * Page preparations that run in the browser right before printing. The
+ * functions are serialised and evaluated in the page, so they can't use
+ * anything from this module's scope. Run them with `inPage`, which hands each
+ * one the shared DOM helpers of `domHelpers` as second argument:
+ *
+ *   await page.evaluate(inPage(expandTabs, { budgetMs: 5000 }));
  *
  * They walk the composed tree, so content inside open shadow roots (web
  * components) and slotted children are found too.
  *
  * Opt out per element with the class `sb-print-no-fit`.
  */
+
+/** Helpers every page function gets. Self-contained: serialised by `inPage`. */
+export function domHelpers() {
+  /** Every element below `root`, including those in open shadow roots. */
+  const elements = (root = document) => {
+    const out = [];
+    const collect = (node) => {
+      for (const el of node.querySelectorAll('*')) {
+        out.push(el);
+        if (el.shadowRoot) collect(el.shadowRoot);
+      }
+    };
+    collect(root);
+    return out;
+  };
+
+  /**
+   * Resolves once nothing changed for `quietMs` in the light DOM and every open
+   * shadow root, also shadow roots that appear while waiting (hydration).
+   * Never waits longer than `maxMs`.
+   */
+  const quiet = ({ quietMs, maxMs }) =>
+    new Promise((resolve) => {
+      const options = { subtree: true, childList: true, characterData: true, attributes: true };
+      const roots = new Set();
+      const observers = [];
+      let timer;
+      const bump = () => { clearTimeout(timer); timer = setTimeout(done, quietMs); };
+      const watch = (root) => {
+        if (roots.has(root)) return false;
+        roots.add(root);
+        const observer = new MutationObserver(bump);
+        observer.observe(root, options);
+        observers.push(observer);
+        return true;
+      };
+      const scan = () => elements().reduce((added, el) => (el.shadowRoot && watch(el.shadowRoot)) || added, false);
+      const poll = setInterval(() => scan() && bump(), 50);
+      const cap = setTimeout(done, maxMs);
+      function done() {
+        observers.forEach((o) => o.disconnect());
+        clearTimeout(timer);
+        clearTimeout(cap);
+        clearInterval(poll);
+        resolve();
+      }
+      watch(document.body);
+      scan();
+      bump();
+    });
+
+  return { elements, quiet };
+}
+
+/** Expression for `page.evaluate` that runs `fn(arg, domHelpers())` in the page. */
+export const inPage = (fn, arg = {}) => `(${fn})(${JSON.stringify(arg)}, (${domHelpers})())`;
 
 /**
  * Waits until the page is finished: custom elements are defined and hydrated
@@ -20,23 +79,10 @@
  * @param {{ quietMs: number, maxMs: number, defineMs?: number }} options
  *   `defineMs` caps the wait for custom elements that never get defined.
  */
-export async function settlePage({ quietMs, maxMs, defineMs = 3000 }) {
+export async function settlePage({ quietMs, maxMs, defineMs = 3000 }, { elements, quiet }) {
   const started = performance.now();
   const left = () => Math.max(0, maxMs - (performance.now() - started));
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-  // Every element, including those in open shadow roots.
-  const elements = () => {
-    const out = [];
-    const collect = (root) => {
-      for (const el of root.querySelectorAll('*')) {
-        out.push(el);
-        if (el.shadowRoot) collect(el.shadowRoot);
-      }
-    };
-    collect(document);
-    return out;
-  };
 
   // Tags that never got defined in time are not waited for again (also not
   // in a later settle on the same page).
@@ -70,44 +116,12 @@ export async function settlePage({ quietMs, maxMs, defineMs = 3000 }) {
     return pending.length > 0;
   };
 
-  // Resolves once nothing changed for `quietMs`: light DOM and every open
-  // shadow root, also shadow roots that appear while waiting (hydration).
-  const quiet = () =>
-    new Promise((resolve) => {
-      const options = { subtree: true, childList: true, characterData: true, attributes: true };
-      const roots = new Set();
-      const observers = [];
-      let timer;
-      const bump = () => { clearTimeout(timer); timer = setTimeout(done, quietMs); };
-      const watch = (root) => {
-        if (roots.has(root)) return false;
-        roots.add(root);
-        const observer = new MutationObserver(bump);
-        observer.observe(root, options);
-        observers.push(observer);
-        return true;
-      };
-      const scan = () => elements().reduce((added, el) => (el.shadowRoot && watch(el.shadowRoot)) || added, false);
-      const poll = setInterval(() => scan() && bump(), 50);
-      const cap = setTimeout(() => done(), left());
-      function done() {
-        observers.forEach((o) => o.disconnect());
-        clearTimeout(timer);
-        clearTimeout(cap);
-        clearInterval(poll);
-        resolve();
-      }
-      watch(document.body);
-      scan();
-      bump();
-    });
-
   const work = (async () => {
     // A few rounds: hydration can add images, images can add nothing, etc.
     for (let round = 0; round < 4 && left() > 0; round++) {
       const defined = await waitForDefinitions();
       const loaded = await waitForMedia();
-      await quiet();
+      await quiet({ quietMs, maxMs: left() });
       if (!defined && !loaded) break;
     }
   })();
@@ -139,7 +153,7 @@ export async function settlePage({ quietMs, maxMs, defineMs = 3000 }) {
  *
  * @returns {Promise<{ tabsets: number, tabs: number, skipped: string[] }>}
  */
-export async function expandTabs({ quietMs = 150, maxMs = 3000, budgetMs = 20_000, maxRounds = 8 } = {}) {
+export async function expandTabs({ quietMs = 150, maxMs = 3000, budgetMs = 20_000, maxRounds = 8 } = {}, helpers) {
   const LABEL_CSS = `
     .sb-pdf-tab + .sb-pdf-tab, * + .sb-pdf-tab-label { margin-top: 14pt; }
     .sb-pdf-tab-label {
@@ -248,44 +262,7 @@ export async function expandTabs({ quietMs = 150, maxMs = 3000, budgetMs = 20_00
     return label;
   };
 
-  // Resolves once nothing changed for `quietMs` in the light DOM or any open
-  // shadow root (bounded by `maxMs`).
-  const quiet = () =>
-    new Promise((resolve) => {
-      const options = { subtree: true, childList: true, characterData: true, attributes: true };
-      const roots = new Set();
-      const observers = [];
-      let timer;
-      const bump = () => { clearTimeout(timer); timer = setTimeout(done, quietMs); };
-      const watch = (root) => {
-        if (roots.has(root)) return false;
-        roots.add(root);
-        const observer = new MutationObserver(bump);
-        observer.observe(root, options);
-        observers.push(observer);
-        return true;
-      };
-      const scan = () => {
-        let added = false;
-        const collect = (root) => {
-          for (const el of root.querySelectorAll('*')) if (el.shadowRoot) { added = watch(el.shadowRoot) || added; collect(el.shadowRoot); }
-        };
-        collect(document);
-        return added;
-      };
-      const poll = setInterval(() => scan() && bump(), 50);
-      const cap = setTimeout(() => done(), maxMs);
-      function done() {
-        observers.forEach((o) => o.disconnect());
-        clearTimeout(timer);
-        clearTimeout(cap);
-        clearInterval(poll);
-        resolve();
-      }
-      watch(document.body);
-      scan();
-      bump();
-    });
+  const quiet = () => helpers.quiet({ quietMs, maxMs });
 
   // ---- Copies for the click-through path ------------------------------------
   const SKIPPED_TAGS = new Set(['style', 'script', 'template', 'link', 'meta', 'noscript']);
@@ -557,19 +534,9 @@ export async function expandTabs({ quietMs = 150, maxMs = 3000, budgetMs = 20_00
  *
  * @returns {Promise<number>} number of converted elements
  */
-export async function vectorizeMasks() {
+export async function vectorizeMasks(_options, { elements }) {
   const TRANSPARENT = /^(transparent|rgba\(0, 0, 0, 0\))$/;
   const COMPLEX = 'parsererror, linearGradient, radialGradient, pattern, image, mask, filter, style, foreignObject';
-
-  // Every element, including those in open shadow roots.
-  const elements = [];
-  const collect = (root) => {
-    for (const el of root.querySelectorAll('*')) {
-      elements.push(el);
-      if (el.shadowRoot) collect(el.shadowRoot);
-    }
-  };
-  collect(document.body);
   const optedOut = (el) => {
     for (let node = el; node; node = node.parentElement ?? node.parentNode?.host) {
       if (node.classList?.contains('sb-print-no-fit')) return true;
@@ -614,7 +581,7 @@ export async function vectorizeMasks() {
 
   const cache = new Map();
   let converted = 0;
-  for (const el of elements) {
+  for (const el of elements(document.body)) {
     const cs = getComputedStyle(el);
     const mask = cs.maskImage && cs.maskImage !== 'none' ? cs.maskImage : cs.webkitMaskImage;
     if (!mask || mask === 'none') continue;

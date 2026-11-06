@@ -87,7 +87,6 @@ const options = {
   'storybook-url': { type: 'string' },
   browser: { type: 'string' },
   'browser-path': { type: 'string' },
-  chromium: { type: 'string' }, // deprecated alias of --browser-path
   build: { type: 'boolean' },
   'no-build': { type: 'boolean' },
   'config-dir': { type: 'string' },
@@ -158,7 +157,7 @@ async function main() {
     pageNumbers: v['no-page-numbers'] ? false : undefined,
     storybookUrl: v['storybook-url'],
     browser: v.browser,
-    browserPath: fromCli(v['browser-path'] ?? v.chromium),
+    browserPath: fromCli(v['browser-path']),
     build: v['no-build'] ? false : v.build,
     configDir: v['config-dir'],
     expandTabs: v['no-expand-tabs'] ? false : undefined,

@@ -19,7 +19,7 @@ import { launchBrowser } from '../src/browser.js';
 import { pdfText } from './pdf-text.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fake-storybook', import.meta.url));
-const browserPath = process.env.STORYBOOK_PDF_BROWSER_PATH ?? process.env.STORYBOOK_PDF_CHROMIUM;
+const browserPath = process.env.STORYBOOK_PDF_BROWSER_PATH;
 const openBrowser = async () => (await launchBrowser({ browserPath })).browser;
 
 let browserMissing = null;
@@ -373,7 +373,7 @@ test('PDF: Stencil-like web components (late hydration, panels in shadow roots, 
 
 test('expandTabs reports tab sets it cannot expand instead of printing empty panels', async (t) => {
   if (browserMissing) return t.skip();
-  const { expandTabs } = await import('../src/prepare.js');
+  const { expandTabs, inPage } = await import('../src/prepare.js');
   const browser = await openBrowser();
   try {
     const page = await browser.newPage();
@@ -401,7 +401,7 @@ test('expandTabs reports tab sets it cannot expand instead of printing empty pan
           document.getElementById('blank-panel').innerHTML = tab.textContent === 'Two' ? '<p> </p>' : '<p>' + tab.textContent + ' content</p>';
         });
       </script>`);
-    const stats = await page.evaluate(expandTabs);
+    const stats = await page.evaluate(inPage(expandTabs));
     assert.equal(stats.tabsets, 1);
     assert.equal(stats.tabs, 2);
     assert.match(stats.skipped.join('\n'), /"First, Second": no content for "Second"/);

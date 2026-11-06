@@ -8,8 +8,7 @@ import { serveStatic } from './server.js';
 import { launchBrowser } from './browser.js';
 import { buildStorybook, findConfigDir } from './build.js';
 import { normaliseIndex, selectEntries, buildTree, assertMode } from './entries.js';
-import * as defaults from './templates.js';
-import { DEFAULT_THEME, DEFAULT_TEMPLATES, PAGE_LINK, documentHtml, overlayHtml, resolveLogo, esc } from './templates.js';
+import { DEFAULT_THEME, DEFAULT_TEMPLATES, BASE_CSS, PAGE_LINK, documentHtml, overlayHtml, resolveLogo, esc } from './templates.js';
 import { listenForRender, renderEntry, renderHtml } from './render.js';
 import { merge, applyOverlay, pageCount, startPages, rewriteLinks, pageIndexById, addOutline } from './pdf.js';
 import { NO_MARGIN, isUrl, firstLine, formatTitle, entryLabel, plural, readProjectPackage, printableWidth } from './util.js';
@@ -17,7 +16,10 @@ import { NO_MARGIN, isUrl, firstLine, formatTitle, entryLabel, plural, readProje
 const { PDFDocument } = PDFLib;
 
 export { normaliseIndex, selectEntries, buildTree, sidebarOrder } from './entries.js';
-export { defaults as templates, esc };
+export { esc };
+
+/** The default templates, to build on in your own. */
+export const templates = Object.freeze({ ...DEFAULT_TEMPLATES, DEFAULT_THEME, BASE_CSS });
 
 /** Identity helper for typed / documented config files. */
 export const defineConfig = (config) => config;
@@ -181,7 +183,7 @@ export async function exportPdf(opts = {}) {
 const KNOWN_OPTIONS = new Set([
   ...Object.keys(DEFAULTS),
   'source', 'title', 'subtitle', 'author', 'version', 'date', 'theme', 'templates', 'hooks',
-  'storybookUrl', 'browserPath', 'chromium', 'build', 'cwd', 'log', 'warn',
+  'storybookUrl', 'browserPath', 'build', 'cwd', 'log', 'warn',
 ]);
 
 function normaliseOptions(opts) {
@@ -208,8 +210,7 @@ function normaliseOptions(opts) {
     date: given.date == null ? new Date() : new Date(given.date),
   };
 
-  // `chromium` and STORYBOOK_PDF_CHROMIUM are the old names of browserPath.
-  o.browserPath = given.browserPath ?? given.chromium ?? process.env.STORYBOOK_PDF_BROWSER_PATH ?? process.env.STORYBOOK_PDF_CHROMIUM;
+  o.browserPath = given.browserPath ?? process.env.STORYBOOK_PDF_BROWSER_PATH;
   if (given.browser === undefined && process.env.STORYBOOK_PDF_BROWSER) o.browser = process.env.STORYBOOK_PDF_BROWSER;
   if (o.build !== undefined && typeof o.build !== 'boolean') throw new Error('"build" must be true, false or left out (auto).');
 

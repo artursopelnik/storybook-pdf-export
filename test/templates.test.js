@@ -57,3 +57,9 @@ test('documentHtml / overlayHtml wire theme variables and page geometry', () => 
   assert.equal(overlay.match(/class="sheet"/g).length, 2);
   assert.match(overlay, /size: 595pt 842pt/);
 });
+
+test('the public templates export holds only the documented defaults', async () => {
+  const { templates } = await import('../src/index.js');
+  assert.deepEqual(Object.keys(templates).sort(), ['BASE_CSS', 'DEFAULT_THEME', 'back', 'cover', 'css', 'footer', 'header', 'toc']);
+  assert.ok(Object.isFrozen(templates));
+});
